@@ -1,0 +1,1542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocVision AI - 智能文档识别系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                        accent: '#0ea5e9',
+                        dark: '#0f172a',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        inter: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .text-shadow {
+                text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .transition-all-300 {
+                transition: all 300ms ease-in-out;
+            }
+            .backdrop-blur {
+                backdrop-filter: blur(8px);
+            }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen font-inter text-slate-800 overflow-x-hidden">
+    <!-- 导航栏 -->
+    <nav id="navbar" class="fixed top-0 w-full z-50 transition-all duration-300 bg-white/90 backdrop-blur shadow-sm">
+        <div class="container mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <i class="fa fa-file-text-o text-2xl text-primary"></i>
+                <h1 class="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">DocVision AI</h1>
+            </div>
+            
+            <div class="hidden md:flex items-center space-x-6">
+                <a href="#" class="font-medium text-slate-700 hover:text-primary transition-colors">首页</a>
+                <a href="#features" class="font-medium text-slate-700 hover:text-primary transition-colors">功能</a>
+                <a href="#how-it-works" class="font-medium text-slate-700 hover:text-primary transition-colors">使用方法</a>
+            </div>
+            
+            <div class="flex items-center space-x-3">
+                <button id="theme-toggle" class="p-2 rounded-full hover:bg-slate-100 transition-colors">
+                    <i class="fa fa-moon-o text-slate-600"></i>
+                </button>
+                <button class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg transition-all transform hover:scale-105 shadow-md hover:shadow-lg">
+                    <i class="fa fa-github mr-2"></i>GitHub
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容 -->
+    <main class="container mx-auto px-4 pt-24 pb-16">
+        <!-- 欢迎区域 -->
+        <section class="text-center mb-16">
+            <h2 class="text-[clamp(2rem,5vw,3.5rem)] font-bold mb-4 leading-tight text-shadow">
+                智能<span class="text-primary">文档识别</span>，
+                <span class="text-accent">表格提取</span>一体化
+            </h2>
+            <p class="text-slate-600 text-lg max-w-3xl mx-auto mb-8">
+                告别繁琐的手动录入，DocVision AI 为您提供精准高效的文档识别服务，支持多种语言、格式和表格识别。
+            </p>
+            <div class="flex flex-wrap justify-center gap-4">
+                <button id="upload-file" class="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg text-lg font-medium transition-all transform hover:scale-105 shadow-lg hover:shadow-xl">
+                    <i class="fa fa-upload mr-2"></i>上传文件
+                </button>
+            </div>
+        </section>
+
+        <!-- 主要功能区域 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl mx-auto">
+            <!-- 左侧：图像预览 -->
+            <section class="bg-white rounded-2xl shadow-xl overflow-hidden">
+                <div class="p-6 border-b border-slate-100">
+                    <h3 class="text-xl font-semibold flex items-center">
+                        <i class="fa fa-image text-primary mr-2"></i>图像预览
+                    </h3>
+                </div>
+                
+                <div class="p-6">
+                    <!-- 图像显示区域 -->
+                    <div class="aspect-video bg-slate-100 rounded-xl overflow-hidden relative border-2 border-dashed border-slate-300 hover:border-primary transition-colors cursor-pointer" id="image-container">
+                        <img id="captured-image" class="w-full h-full object-contain hidden" alt="已上传的图像">
+                        
+                        <!-- 上传占位符 -->
+                        <div id="upload-placeholder" class="absolute inset-0 flex flex-col items-center justify-center">
+                            <i class="fa fa-cloud-upload text-6xl text-slate-400 mb-4"></i>
+                            <p class="text-slate-500 mb-2">点击或拖拽上传图片</p>
+                            <p class="text-sm text-slate-400">支持表格识别和文档提取</p>
+                        </div>
+                    </div>
+
+                    <!-- 流程步骤指示器 -->
+                    <div id="steps-indicator" class="mt-4 flex justify-between items-center mb-4">
+                        <div class="flex-1 flex flex-col items-center">
+                            <div id="step-1" class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-medium">1</div>
+                            <span class="text-xs mt-1 text-slate-600">上传</span>
+                        </div>
+                        <div class="flex-1 flex items-center">
+                            <div id="step-line-1-2" class="h-1 bg-slate-200 w-full"></div>
+                        </div>
+                        <div class="flex-1 flex flex-col items-center">
+                            <div id="step-2" class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium">2</div>
+                            <span class="text-xs mt-1 text-slate-600">旋转</span>
+                        </div>
+                        <div class="flex-1 flex items-center">
+                            <div id="step-line-2-3" class="h-1 bg-slate-200 w-full"></div>
+                        </div>
+                        <div class="flex-1 flex flex-col items-center">
+                            <div id="step-3" class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium">3</div>
+                            <span class="text-xs mt-1 text-slate-600">框选</span>
+                        </div>
+                        <div class="flex-1 flex items-center">
+                            <div id="step-line-3-4" class="h-1 bg-slate-200 w-full"></div>
+                        </div>
+                        <div class="flex-1 flex flex-col items-center">
+                            <div id="step-4" class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium">4</div>
+                            <span class="text-xs mt-1 text-slate-600">识别</span>
+                        </div>
+                    </div>
+
+                <!-- 旋转界面 -->
+                <div id="rotate-stage" class="mt-6 hidden space-y-4">
+                    <h4 class="text-center text-slate-600">调整图像方向</h4>
+                    <div class="flex flex-wrap gap-3 justify-center">
+                        <button id="rotate-left" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3 rounded-full shadow-sm hover:shadow transition-all">
+                            <i class="fa fa-rotate-left text-xl"></i>
+                        </button>
+                        <button id="rotate-right" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3 rounded-full shadow-sm hover:shadow transition-all">
+                            <i class="fa fa-rotate-right text-xl"></i>
+                        </button>
+                        <button id="enhance-image" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3 rounded-full shadow-sm hover:shadow transition-all">
+                            <i class="fa fa-magic text-xl"></i>
+                        </button>
+                        <button id="retake" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3 rounded-full shadow-sm hover:shadow transition-all">
+                            <i class="fa fa-refresh text-xl"></i>
+                        </button>
+                    </div>
+                    
+                    <!-- 自定义角度旋转控件 -->
+                    <div class="px-4 py-2">
+                        <div class="flex items-center justify-between mb-1">
+                            <label for="rotate-slider" class="text-sm text-slate-600">自定义角度:</label>
+                            <div class="flex items-center">
+                                <input id="rotate-input" type="number" min="-359" max="359" value="0" class="w-16 px-2 py-1 border border-slate-300 rounded text-center text-sm">
+                                <span class="ml-1 text-sm text-slate-600">°</span>
+                                <button id="apply-rotation" class="ml-2 px-3 py-1 bg-primary text-white text-sm rounded">应用</button>
+                            </div>
+                        </div>
+                        <input id="rotate-slider" type="range" min="-359" max="359" value="0" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button id="next-to-crop" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-arrow-right mr-2"></i>下一步：框选
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 框选界面 -->
+                <div id="crop-stage" class="mt-6 hidden">
+                    <h4 class="text-center text-slate-600 mb-4">框选识别区域</h4>
+                    
+                    <!-- 框选容器 -->
+                    <div id="crop-container" class="relative w-full aspect-video bg-slate-50 border border-slate-200 rounded-lg mb-4">
+                        <img id="crop-image" class="w-full h-full object-contain" alt="用于框选的图像">
+                        <!-- 裁剪框将通过JavaScript动态创建 -->
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button id="back-to-rotate" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-arrow-left mr-2"></i>返回旋转
+                        </button>
+                        <button id="next-to-recognize" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-check mr-2"></i>完成框选
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 识别界面 -->
+                <div id="recognize-stage" class="mt-6 hidden space-y-4">
+                    <h4 class="text-center text-slate-600">选择识别类型</h4>
+                    
+                    <!-- 框选区域预览 -->
+                    <div id="crop-preview-container" class="bg-slate-50 rounded-lg border border-slate-200 p-3">
+                        <h5 class="text-sm font-medium text-slate-600 mb-2">框选区域预览</h5>
+                        <div class="aspect-video bg-white rounded-lg overflow-hidden relative">
+                            <img id="crop-preview" class="w-full h-full object-contain" alt="框选区域预览">
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button id="start-ocr" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-file-text-o mr-2"></i>文本识别
+                        </button>
+                        <button id="recognize-table" class="flex-1 bg-secondary hover:bg-secondary/90 text-white py-2.5 rounded-lg shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-table mr-2"></i>表格识别
+                        </button>
+                    </div>
+                </div>
+                </div>
+            </section>
+
+            <!-- 右侧：识别结果和编辑 -->
+            <section class="bg-white rounded-2xl shadow-xl overflow-hidden">
+                <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                    <h3 class="text-xl font-semibold flex items-center">
+                        <i class="fa fa-file-text text-accent mr-2"></i>识别结果
+                    </h3>
+                    <div class="flex gap-2">
+                        <button id="copy-text" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
+                            <i class="fa fa-copy"></i>
+                        </button>
+                        <button id="fix-text" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
+                            <i class="fa fa-magic"></i>
+                        </button>
+                        <button id="download-text" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
+                            <i class="fa fa-file-text-o"></i>
+                        </button>
+                        <button id="save-as-word" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
+                            <i class="fa fa-file-word-o"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="p-6">
+                    <!-- 结果编辑区域 -->
+                    <div id="result-placeholder" class="aspect-video flex flex-col items-center justify-center text-slate-400">
+                        <i class="fa fa-file-text-o text-6xl mb-4"></i>
+                        <p>识别结果将显示在这里</p>
+                    </div>
+                    
+                    <div id="result-container" class="hidden">
+                        <textarea id="result-text" class="w-full min-h-[300px] p-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all resize-none"></textarea>
+                        <div class="mt-4 text-sm text-slate-500 flex justify-between items-center">
+                            <span id="text-stats">0 字符</span>
+                            <div class="flex gap-2">
+                                <button class="text-slate-600 hover:text-primary transition-colors px-2 py-1 rounded hover:bg-slate-100">
+                                    <i class="fa fa-check mr-1"></i>保存
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- 功能介绍 -->
+        <section id="features" class="mt-24 max-w-6xl mx-auto">
+            <h2 class="text-3xl font-bold text-center mb-16">强大功能</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
+                    <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                        <i class="fa fa-camera text-2xl text-primary"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-2">相机实时扫描</h3>
+                    <p class="text-slate-600">支持前后摄像头切换，实时预览和拍摄，智能识别各种文档类型。</p>
+                </div>
+                
+                <div class="bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
+                    <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                        <i class="fa fa-file-text text-2xl text-primary"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-2">多语言OCR</h3>
+                    <p class="text-slate-600">支持中英文混合识别，识别准确率高，自动优化文本格式和版面。</p>
+                </div>
+                
+                <div class="bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
+                    <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                        <i class="fa fa-magic text-2xl text-primary"></i>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-2">智能文本纠错</h3>
+                    <p class="text-slate-600">自动识别和纠正常见的OCR错误，提升识别结果的准确性。</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 使用方法 -->
+        <section id="how-it-works" class="mt-24 max-w-6xl mx-auto">
+            <h2 class="text-3xl font-bold text-center mb-16">使用步骤</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-primary text-white rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold shadow-lg">1</div>
+                    <h3 class="font-semibold mb-2">启动相机</h3>
+                    <p class="text-slate-600 text-sm">点击「开始扫描」按钮启动摄像头</p>
+                </div>
+                
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-primary text-white rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold shadow-lg">2</div>
+                    <h3 class="font-semibold mb-2">拍摄文档</h3>
+                    <p class="text-slate-600 text-sm">将文档对准相机，点击拍摄按钮</p>
+                </div>
+                
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-primary text-white rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold shadow-lg">3</div>
+                    <h3 class="font-semibold mb-2">调整图像</h3>
+                    <p class="text-slate-600 text-sm">旋转图像至正确方向，准备识别</p>
+                </div>
+                
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-primary text-white rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold shadow-lg">4</div>
+                    <h3 class="font-semibold mb-2">开始识别</h3>
+                    <p class="text-slate-600 text-sm">点击「开始识别」获取文本内容</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="bg-dark text-white py-12">
+        <div class="container mx-auto px-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div>
+                    <div class="flex items-center space-x-2 mb-4">
+                        <i class="fa fa-file-text-o text-2xl text-primary"></i>
+                        <h2 class="text-xl font-bold">DocVision AI</h2>
+                    </div>
+                    <p class="text-slate-400 mb-4">智能文档识别系统，让文档数字化变得简单高效。</p>
+                    <div class="flex space-x-4">
+                        <a href="#" class="text-slate-400 hover:text-primary transition-colors">
+                            <i class="fa fa-github text-xl"></i>
+                        </a>
+                        <a href="#" class="text-slate-400 hover:text-primary transition-colors">
+                            <i class="fa fa-twitter text-xl"></i>
+                        </a>
+                        <a href="#" class="text-slate-400 hover:text-primary transition-colors">
+                            <i class="fa fa-linkedin text-xl"></i>
+                        </a>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">快速链接</h3>
+                    <ul class="space-y-2">
+                        <li><a href="#" class="text-slate-400 hover:text-white transition-colors">首页</a></li>
+                        <li><a href="#features" class="text-slate-400 hover:text-white transition-colors">功能</a></li>
+                        <li><a href="#how-it-works" class="text-slate-400 hover:text-white transition-colors">使用方法</a></li>
+                        <li><a href="#" class="text-slate-400 hover:text-white transition-colors">API文档</a></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">联系我们</h3>
+                    <ul class="space-y-2">
+                        <li class="flex items-center text-slate-400">
+                            <i class="fa fa-envelope-o mr-2"></i>
+                            <span>contact@docvision.ai</span>
+                        </li>
+                        <li class="flex items-center text-slate-400">
+                            <i class="fa fa-github mr-2"></i>
+                            <span>github.com/docvision</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="border-t border-slate-800 mt-8 pt-8 text-center text-slate-500">
+                <p>&copy; 2024 DocVision AI. 保留所有权利。</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- 加载中模态框 -->
+    <div id="loading-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden backdrop-blur-sm">
+        <div class="bg-white p-6 rounded-xl shadow-2xl flex flex-col items-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+            <p id="loading-text" class="text-slate-700 font-medium">处理中...</p>
+        </div>
+    </div>
+
+    <!-- 通知提示 -->
+    <div id="toast" class="fixed bottom-4 right-4 bg-slate-800 text-white px-4 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+        <div class="flex items-center">
+            <i id="toast-icon" class="fa fa-check-circle text-green-400 mr-2"></i>
+            <span id="toast-message">操作成功</span>
+        </div>
+    </div>
+
+    <!-- 主要JavaScript -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // DOM元素
+            const capturedImage = document.getElementById('captured-image');
+            const uploadPlaceholder = document.getElementById('upload-placeholder');
+            const resultPlaceholder = document.getElementById('result-placeholder');
+            const resultContainer = document.getElementById('result-container');
+            const resultText = document.getElementById('result-text');
+            const textStats = document.getElementById('text-stats');
+            const loadingModal = document.getElementById('loading-modal');
+            const loadingText = document.getElementById('loading-text');
+            const toast = document.getElementById('toast');
+            const toastIcon = document.getElementById('toast-icon');
+            const toastMessage = document.getElementById('toast-message');
+            const navbar = document.getElementById('navbar');
+            const imageContainer = document.getElementById('image-container');
+            
+            // 多步骤相关元素
+            const rotateStage = document.getElementById('rotate-stage');
+            const cropStage = document.getElementById('crop-stage');
+            const recognizeStage = document.getElementById('recognize-stage');
+            const cropImage = document.getElementById('crop-image');
+            const cropContainer = document.getElementById('crop-container');
+            
+            // 步骤指示器元素
+            const step1 = document.getElementById('step-1');
+            const step2 = document.getElementById('step-2');
+            const step3 = document.getElementById('step-3');
+            const step4 = document.getElementById('step-4');
+            const stepLine12 = document.getElementById('step-line-1-2');
+            const stepLine23 = document.getElementById('step-line-2-3');
+            const stepLine34 = document.getElementById('step-line-3-4');
+
+            // 状态变量
+            let currentImage = null;
+            let currentRotation = 0;
+            let currentStep = 0; // 0: 初始状态, 1: 上传完成, 2: 旋转完成, 3: 框选完成
+            let cropSelection = { x1: 0, y1: 0, x2: 0, y2: 0, active: false };
+
+            // 显示通知
+            function showToast(message, isSuccess = true) {
+                toastMessage.textContent = message;
+                toastIcon.className = isSuccess 
+                    ? 'fa fa-check-circle text-green-400 mr-2' 
+                    : 'fa fa-exclamation-circle text-red-400 mr-2';
+                toast.classList.remove('translate-y-20', 'opacity-0');
+                toast.classList.add('translate-y-0', 'opacity-100');
+                
+                setTimeout(() => {
+                    toast.classList.remove('translate-y-0', 'opacity-100');
+                    toast.classList.add('translate-y-20', 'opacity-0');
+                }, 3000);
+            }
+
+            // 显示加载状态
+            function showLoading(message = '处理中...') {
+                loadingText.textContent = message;
+                loadingModal.classList.remove('hidden');
+            }
+
+            // 隐藏加载状态
+            function hideLoading() {
+                loadingModal.classList.add('hidden');
+            }
+
+            // 更新文本统计
+            function updateTextStats() {
+                const text = resultText.value;
+                textStats.textContent = `${text.length} 字符`;
+            }
+
+            // 更新步骤指示器
+            function updateStepIndicator(step) {
+                // 重置所有步骤
+                [step1, step2, step3, step4].forEach(el => {
+                    el.className = 'w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium';
+                });
+                [stepLine12, stepLine23, stepLine34].forEach(el => {
+                    el.className = 'h-1 bg-slate-200 w-full';
+                });
+                
+                // 设置当前步骤
+                if (step >= 1) {
+                    step1.className = 'w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-medium';
+                }
+                if (step >= 2) {
+                    step2.className = 'w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-medium';
+                    stepLine12.className = 'h-1 bg-primary w-full';
+                }
+                if (step >= 3) {
+                    step3.className = 'w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-medium';
+                    stepLine23.className = 'h-1 bg-primary w-full';
+                }
+                if (step >= 4) {
+                    step4.className = 'w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-medium';
+                    stepLine34.className = 'h-1 bg-primary w-full';
+                }
+            }
+
+            // 进入旋转界面
+            function enterRotateStage() {
+                updateStepIndicator(2);
+                rotateStage.classList.remove('hidden');
+                cropStage.classList.add('hidden');
+                recognizeStage.classList.add('hidden');
+                currentStep = 1;
+            }
+
+            // 进入框选界面
+            function enterCropStage() {
+                updateStepIndicator(3);
+                rotateStage.classList.add('hidden');
+                cropStage.classList.remove('hidden');
+                recognizeStage.classList.add('hidden');
+                
+                // 设置裁剪图像
+                cropImage.src = currentImage;
+                
+                // 重置裁剪选择
+                cropSelection = { x1: 0, y1: 0, x2: 0, y2: 0, active: false };
+                
+                // 初始化框选功能
+                initCropSelection();
+                
+                currentStep = 2;
+            }
+
+            // 全新实现的图片裁剪预览函数
+            function createCropPreview() {
+                // 获取预览相关元素并初始化
+                const cropPreviewContainer = document.getElementById('crop-preview-container');
+                const previewImg = document.getElementById('crop-preview');
+                const cropImage = document.getElementById('crop-image');
+                
+                // 初始化变量，确保所有变量都有初始值
+                let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+                let displayWidth = 0, displayHeight = 0;
+                let imgWidth = 0, imgHeight = 0;
+                let scaleX = 1, scaleY = 1;
+                let safeX1 = 0, safeY1 = 0, safeX2 = 0, safeY2 = 0;
+                let width = 0, height = 0;
+                
+                // 全面参数验证，每个条件都有详细日志
+                if (!previewImg) {
+                    console.error('找不到预览图片元素');
+                    return;
+                }
+                
+                if (!cropPreviewContainer) {
+                    console.error('找不到预览容器元素');
+                    previewImg.alt = '找不到预览容器';
+                    return;
+                }
+                
+                if (!savedCropSelection || typeof savedCropSelection !== 'object') {
+                    console.error('保存的裁剪区域无效:', savedCropSelection);
+                    previewImg.alt = '没有选择区域';
+                    return;
+                }
+                
+                // 检查裁剪区域是否有必要的属性
+                if (savedCropSelection.x1 === undefined || savedCropSelection.y1 === undefined || 
+                    savedCropSelection.x2 === undefined || savedCropSelection.y2 === undefined) {
+                    console.error('裁剪区域缺少必要的坐标属性:', savedCropSelection);
+                    previewImg.alt = '无效的选择区域';
+                    return;
+                }
+                
+                if (!currentImage) {
+                    console.error('没有当前图像');
+                    previewImg.alt = '没有图像';
+                    return;
+                }
+                
+                if (!cropImage) {
+                    console.error('找不到裁剪图像元素');
+                    previewImg.alt = '找不到裁剪图像';
+                    return;
+                }
+                
+                console.log('开始创建框选预览，裁剪区域:', JSON.stringify(savedCropSelection));
+                
+                try {
+                    // 计算框选区域坐标
+                    x1 = Math.min(Number(savedCropSelection.x1) || 0, Number(savedCropSelection.x2) || 0);
+                    y1 = Math.min(Number(savedCropSelection.y1) || 0, Number(savedCropSelection.y2) || 0);
+                    x2 = Math.max(Number(savedCropSelection.x1) || 0, Number(savedCropSelection.x2) || 0);
+                    y2 = Math.max(Number(savedCropSelection.y1) || 0, Number(savedCropSelection.y2) || 0);
+                    
+                    // 立即检查坐标有效性
+                    if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) {
+                        console.error('无效的坐标值:', x1, y1, x2, y2);
+                        previewImg.alt = '无效的坐标';
+                        return;
+                    }
+                    
+                    // 创建画布和图像对象
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const img = new Image();
+                    
+                    // 设置跨域访问
+                    img.crossOrigin = 'anonymous';
+                    
+                    // 图片加载完成后的处理函数
+                    img.onload = function() {
+                        try {
+                            // 直接使用img的原始尺寸，不依赖于显示尺寸
+                            imgWidth = img.naturalWidth || 0;
+                            imgHeight = img.naturalHeight || 0;
+                            
+                            // 获取裁剪容器的实际尺寸作为基准
+                            const containerRect = cropContainer ? cropContainer.getBoundingClientRect() : {width: 0, height: 0};
+                            displayWidth = containerRect.width || imgWidth; // 备用值使用图像原始宽度
+                            displayHeight = containerRect.height || imgHeight; // 备用值使用图像原始高度
+                            
+                            // 只检查原始图像尺寸的有效性
+                            if (imgWidth <= 0 || imgHeight <= 0) {
+                                console.error('无效的图像原始尺寸:', imgWidth, imgHeight);
+                                previewImg.alt = '图像原始尺寸无效';
+                                return;
+                            }
+                            
+                            // 计算缩放比例，避免除零错误
+                            scaleX = (displayWidth > 0) ? imgWidth / displayWidth : 1;
+                            scaleY = (displayHeight > 0) ? imgHeight / displayHeight : 1;
+                            
+                            console.log('框选区域坐标:', x1, y1, x2, y2);
+                            console.log('图像显示尺寸:', displayWidth, 'x', displayHeight);
+                            console.log('图像原始尺寸:', imgWidth, 'x', imgHeight);
+                            console.log('缩放比例:', scaleX, 'x', scaleY);
+                            
+                            // 计算原始图像坐标
+                            const originalX1 = Math.round(x1 * scaleX);
+                            const originalY1 = Math.round(y1 * scaleY);
+                            const originalX2 = Math.round(x2 * scaleX);
+                            const originalY2 = Math.round(y2 * scaleY);
+                            
+                            // 边界检查
+                            safeX1 = Math.max(0, originalX1);
+                            safeY1 = Math.max(0, originalY1);
+                            safeX2 = Math.min(imgWidth, originalX2);
+                            safeY2 = Math.min(imgHeight, originalY2);
+                            
+                            // 计算裁剪尺寸
+                            width = safeX2 - safeX1;
+                            height = safeY2 - safeY1;
+                            
+                            console.log('裁剪区域原始坐标:', safeX1, safeY1, safeX2, safeY2);
+                            console.log('裁剪尺寸:', width, 'x', height);
+                            
+                            // 确保尺寸有效
+                            if (width <= 0 || height <= 0 || isNaN(width) || isNaN(height)) {
+                                console.error('无效的裁剪尺寸:', width, 'x', height);
+                                previewImg.alt = '无效的裁剪区域';
+                                return;
+                            }
+                            
+                            // 设置画布尺寸
+                            canvas.width = width;
+                            canvas.height = height;
+                            
+                            // 清理画布
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            
+                            // 安全绘制图像
+                            try {
+                                ctx.drawImage(
+                                    img,       // 图像源
+                                    safeX1,    // 源图像x坐标
+                                    safeY1,    // 源图像y坐标
+                                    width,     // 源图像宽度
+                                    height,    // 源图像高度
+                                    0,         // 目标x坐标
+                                    0,         // 目标y坐标
+                                    width,     // 目标宽度
+                                    height     // 目标高度
+                                );
+                                
+                                // 生成预览数据
+                                try {
+                                    const dataURL = canvas.toDataURL('image/png');
+                                    console.log('成功生成数据URL');
+                                    
+                                    // 显示预览
+                                    previewImg.onload = function() {
+                                        console.log('预览图片加载成功');
+                                        cropPreviewContainer.style.display = 'block';
+                                    };
+                                    
+                                    previewImg.onerror = function() {
+                                        console.error('预览图片加载失败');
+                                        previewImg.alt = '预览加载失败';
+                                    };
+                                    
+                                    previewImg.src = dataURL;
+                                    previewImg.alt = '框选区域预览';
+                                    
+                                } catch (e) {
+                                    console.error('生成数据URL失败:', e);
+                                    previewImg.alt = '生成预览失败';
+                                }
+                                
+                            } catch (drawError) {
+                                console.error('绘制图像失败:', drawError);
+                                previewImg.alt = '绘制预览失败';
+                            }
+                            
+                        } catch (loadError) {
+                            console.error('处理图像加载结果出错:', loadError);
+                            previewImg.alt = '处理图像失败';
+                        }
+                    };
+                    
+                    img.onerror = function() {
+                        console.error('原始图像加载失败');
+                        previewImg.alt = '图像加载失败';
+                    };
+                    
+                    // 设置图片源
+                    console.log('加载原始图像');
+                    img.src = currentImage;
+                    
+                } catch (initError) {
+                    console.error('初始化裁剪预览失败:', initError);
+                    if (previewImg) previewImg.alt = '初始化失败';
+                }
+            }
+
+            // 进入识别界面
+            function enterRecognizeStage() {
+                updateStepIndicator(4);
+                rotateStage.classList.add('hidden');
+                cropStage.classList.add('hidden');
+                recognizeStage.classList.remove('hidden');
+                currentStep = 3;
+                
+                // 创建并显示框选区域预览
+                createCropPreview();
+            }
+
+            // 初始化框选功能
+            function initCropSelection() {
+                if (!cropContainer || !cropImage) return;
+                
+                let selectionBox = null;
+                
+                // 防止浏览器默认的图片拖拽行为
+                cropImage.addEventListener('dragstart', function(e) {
+                    e.preventDefault();
+                });
+                
+                // 添加阻止拖拽的样式
+                cropImage.style.userDrag = 'none';
+                cropImage.style.webkitUserDrag = 'none';
+                cropImage.style.cursor = 'crosshair';
+                
+                // 清理之前的事件监听器
+                cropContainer.removeEventListener('mousedown', onMouseDown);
+                cropContainer.removeEventListener('mousemove', onMouseMove);
+                cropContainer.removeEventListener('mouseup', onMouseUp);
+                cropContainer.removeEventListener('dragstart', preventDefault);
+                
+                // 阻止容器的拖拽默认行为
+                function preventDefault(e) {
+                    e.preventDefault();
+                }
+                
+                cropContainer.addEventListener('dragstart', preventDefault);
+                
+                function onMouseDown(e) {
+                    // 确保点击的是容器而不是其他元素
+                    if (e.target === cropImage || e.target === cropContainer) {
+                        const rect = cropContainer.getBoundingClientRect();
+                        const x = e.clientX - rect.left;
+                        const y = e.clientY - rect.top;
+                        
+                        cropSelection = { x1: x, y1: y, x2: x, y2: y, active: true };
+                        
+                        // 创建选择框
+                        if (!selectionBox) {
+                            selectionBox = document.createElement('div');
+                            selectionBox.className = 'absolute border-2 border-dashed border-primary bg-primary/20';
+                            cropContainer.appendChild(selectionBox);
+                        }
+                        selectionBox.style.display = 'block';
+                        updateSelectionBox();
+                    }
+                }
+                
+                function onMouseMove(e) {
+                    if (!cropSelection.active) return;
+                    
+                    const rect = cropContainer.getBoundingClientRect();
+                    cropSelection.x2 = e.clientX - rect.left;
+                    cropSelection.y2 = e.clientY - rect.top;
+                    updateSelectionBox();
+                }
+                
+                function onMouseUp() {
+                    cropSelection.active = false;
+                    
+                    // 确保选择框有最小尺寸
+                    if (Math.abs(cropSelection.x2 - cropSelection.x1) < 10 || 
+                        Math.abs(cropSelection.y2 - cropSelection.y1) < 10) {
+                        // 如果只是点击而非拖拽，不保存新的选择
+                        // 保留之前的选择（如果有）或者不执行任何操作
+                        console.log('点击操作，未形成有效选择区域');
+                        return;
+                    }
+                    
+                    // 保存框选区域到全局变量
+                    savedCropSelection = { ...cropSelection };
+                    console.log('框选区域已保存:', savedCropSelection);
+                    
+                    // 立即计算并保存图像坐标（使用新的计算方法）
+                    savedImageCoordinates = calculateImageCoordinates(savedCropSelection);
+                    console.log('立即计算并保存的图像坐标:', savedImageCoordinates);
+                    
+                    updateSelectionBox();
+                }
+                
+                function updateSelectionBox() {
+                    if (!selectionBox) return;
+                    
+                    const x = Math.min(cropSelection.x1, cropSelection.x2);
+                    const y = Math.min(cropSelection.y1, cropSelection.y2);
+                    const width = Math.abs(cropSelection.x2 - cropSelection.x1);
+                    const height = Math.abs(cropSelection.y2 - cropSelection.y1);
+                    
+                    selectionBox.style.left = `${x}px`;
+                    selectionBox.style.top = `${y}px`;
+                    selectionBox.style.width = `${width}px`;
+                    selectionBox.style.height = `${height}px`;
+                }
+                
+                // 绑定事件监听器
+                cropContainer.addEventListener('mousedown', onMouseDown);
+                cropContainer.addEventListener('mousemove', onMouseMove);
+                cropContainer.addEventListener('mouseup', onMouseUp);
+            }
+
+            // 处理文件上传
+            function handleFileUpload(file) {
+                if (!file) return;
+                
+                // 检查文件类型
+                if (!file.type.match('image.*')) {
+                    showToast('请上传图片文件', false);
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    currentImage = event.target.result;
+                    currentRotation = 0;
+                    
+                    uploadPlaceholder.classList.add('hidden');
+                    capturedImage.src = currentImage;
+                    capturedImage.classList.remove('hidden');
+                    
+                    // 隐藏主操作按钮
+                    const mainActions = document.getElementById('main-actions');
+                    if (mainActions) {
+                        mainActions.classList.add('hidden');
+                    }
+                    
+                    // 进入旋转界面
+                    enterRotateStage();
+                    
+                    showToast('文件上传成功');
+                };
+                reader.readAsDataURL(file);
+            }
+
+            // 触发文件选择器
+            function triggerFileUpload() {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = function(e) {
+                    handleFileUpload(e.target.files[0]);
+                };
+                input.click();
+            }
+
+            // 实时预览旋转（前端CSS实现）
+            function previewRotate(angle) {
+                if (!capturedImage) return;
+                capturedImage.style.transform = `rotate(${angle}deg)`;
+            }
+            
+            // 应用旋转（后端处理实际旋转）
+            async function applyRotation(angle) {
+                if (!currentImage) return;
+                
+                showLoading('旋转中...');
+                
+                try {
+                    const response = await fetch('/api/rotate', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            image: currentImage.split(',')[1],
+                            angle: angle
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    if (data.success) {
+                        currentImage = data.image;
+                        capturedImage.src = currentImage;
+                        // 移除CSS旋转效果
+                        capturedImage.style.transform = 'none';
+                        
+                        // 更新当前旋转角度
+                        currentRotation = (currentRotation + angle) % 360;
+                        
+                        hideLoading();
+                        showToast('旋转成功');
+                    } else {
+                        throw new Error(data.error || '旋转失败');
+                    }
+                } catch (error) {
+                    console.error('旋转错误:', error);
+                    hideLoading();
+                    showToast('图像旋转失败', false);
+                    // 恢复CSS旋转
+                    capturedImage.style.transform = `rotate(${currentRotation}deg)`;
+                }
+            }
+            
+            // 快捷旋转（90度）
+            async function quickRotate(angle) {
+                // 先更新CSS预览
+                capturedImage.style.transform = `rotate(${currentRotation + angle}deg)`;
+                
+                // 然后应用实际旋转
+                await applyRotation(angle);
+            }
+            
+            // 图像增强函数
+            async function enhanceImage() {
+                if (!currentImage) return;
+                
+                showLoading('正在增强图像清晰度...');
+                
+                try {
+                    // 这里我们复用旋转API，因为它已经包含了图像处理和返回的逻辑
+                    // 在实际应用中，最好创建一个专门的增强API
+                    const response = await fetch('/api/rotate', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            image: currentImage.split(',')[1],
+                            angle: 0,  // 不旋转，只做增强
+                            enhance: true  // 添加增强标志
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    if (data.success) {
+                        currentImage = data.image;
+                        capturedImage.src = currentImage;
+                        hideLoading();
+                        showToast('图像清晰度提升成功');
+                    } else {
+                        throw new Error(data.error || '增强失败');
+                    }
+                } catch (error) {
+                    console.error('图像增强错误:', error);
+                    hideLoading();
+                    showToast('图像增强失败', false);
+                }
+            }
+
+            // 保存框选区域（DOM坐标）
+            let savedCropSelection = null;
+            // 保存转换后的图像坐标
+            let savedImageCoordinates = null;
+            
+            // 修复版图像坐标计算函数
+            function calculateImageCoordinates(cropArea) {
+                try {
+                    // 参数验证
+                    if (!cropArea || !cropContainer || !currentImage) {
+                        console.error('缺少必要参数:', {cropArea, cropContainer, currentImage});
+                        return null;
+                    }
+                    
+                    const cropImage = document.getElementById('crop-image');
+                    if (!cropImage) {
+                        console.error('找不到crop-image元素');
+                        return null;
+                    }
+                    
+                    // 规范化框选坐标
+                    const x1 = Math.min(Number(cropArea.x1) || 0, Number(cropArea.x2) || 0);
+                    const y1 = Math.min(Number(cropArea.y1) || 0, Number(cropArea.y2) || 0);
+                    const x2 = Math.max(Number(cropArea.x1) || 0, Number(cropArea.x2) || 0);
+                    const y2 = Math.max(Number(cropArea.y1) || 0, Number(cropArea.y2) || 0);
+                    
+                    // 确保坐标有效
+                    if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) {
+                        console.error('无效的坐标值:', x1, y1, x2, y2);
+                        return null;
+                    }
+                    
+                    // 获取图像的实际显示尺寸和位置
+                    const imgRect = cropImage.getBoundingClientRect();
+                    const containerRect = cropContainer.getBoundingClientRect();
+                    
+                    // 计算图像在容器内的实际位置
+                    const imgX = imgRect.left - containerRect.left;
+                    const imgY = imgRect.top - containerRect.top;
+                    const displayWidth = imgRect.width || 1;
+                    const displayHeight = imgRect.height || 1;
+                    
+                    // 直接使用cropImage的naturalWidth/Height获取原始尺寸
+                    const imgWidth = cropImage.naturalWidth || 1;
+                    const imgHeight = cropImage.naturalHeight || 1;
+                    
+                    // 考虑旋转角度
+                    const rotation = Math.abs(currentRotation) % 360;
+                    
+                    // 计算基本缩放比例
+                    const scaleX = imgWidth / displayWidth;
+                    const scaleY = imgHeight / displayHeight;
+                
+                console.log('图像在容器内位置:', imgX, imgY);
+                console.log('图像显示尺寸:', displayWidth, 'x', displayHeight);
+                console.log('图像原始尺寸:', imgWidth, 'x', imgHeight);
+                console.log('缩放比例:', scaleX, 'x', scaleY);
+                console.log('当前旋转角度:', currentRotation);
+                console.log('框选DOM坐标:', x1, y1, x2, y2);
+                
+                // 计算相对于图像的坐标（考虑图像在容器中的位置）
+                const relativeX1 = Math.max(0, x1 - imgX);
+                const relativeY1 = Math.max(0, y1 - imgY);
+                const relativeX2 = Math.min(displayWidth, x2 - imgX);
+                const relativeY2 = Math.min(displayHeight, y2 - imgY);
+                
+                console.log('相对于图像的坐标:', relativeX1, relativeY1, relativeX2, relativeY2);
+                
+                // 转换到原始图像坐标
+                let originalX1 = Math.round(relativeX1 * scaleX);
+                let originalY1 = Math.round(relativeY1 * scaleY);
+                let originalX2 = Math.round(relativeX2 * scaleX);
+                let originalY2 = Math.round(relativeY2 * scaleY);
+                
+                // 边界检查
+                let safeX1 = Math.max(0, originalX1);
+                let safeY1 = Math.max(0, originalY1);
+                let safeX2 = Math.min(imgWidth, originalX2);
+                let safeY2 = Math.min(imgHeight, originalY2);
+                
+                // 针对旋转角度进行坐标调整 - 简化的旋转处理逻辑
+                if (rotation !== 0) {
+                    // 计算旋转后新的坐标
+                    let rotatedX1, rotatedY1, rotatedX2, rotatedY2;
+                    
+                    // 根据不同旋转角度应用转换
+                    if (rotation === 90) {
+                        // 90度顺时针旋转：(x,y) -> (y, height-x)
+                        rotatedX1 = safeY1;
+                        rotatedY1 = imgHeight - safeX2;
+                        rotatedX2 = safeY2;
+                        rotatedY2 = imgHeight - safeX1;
+                    } else if (rotation === 180) {
+                        // 180度旋转：(x,y) -> (width-x, height-y)
+                        rotatedX1 = imgWidth - safeX2;
+                        rotatedY1 = imgHeight - safeY2;
+                        rotatedX2 = imgWidth - safeX1;
+                        rotatedY2 = imgHeight - safeY1;
+                    } else if (rotation === 270) {
+                        // 270度顺时针旋转：(x,y) -> (width-y, x)
+                        rotatedX1 = imgWidth - safeY2;
+                        rotatedY1 = safeX1;
+                        rotatedX2 = imgWidth - safeY1;
+                        rotatedY2 = safeX2;
+                    }
+                    
+                    // 更新坐标
+                    if (rotatedX1 !== undefined) {
+                        safeX1 = rotatedX1;
+                        safeY1 = rotatedY1;
+                        safeX2 = rotatedX2;
+                        safeY2 = rotatedY2;
+                        
+                        // 重新应用边界检查
+                        safeX1 = Math.max(0, safeX1);
+                        safeY1 = Math.max(0, safeY1);
+                        safeX2 = Math.min(rotation === 90 || rotation === 270 ? imgHeight : imgWidth, safeX2);
+                        safeY2 = Math.min(rotation === 90 || rotation === 270 ? imgWidth : imgHeight, safeY2);
+                    }
+                }
+                
+                // 最终边界检查
+                safeX1 = Math.max(0, safeX1);
+                safeY1 = Math.max(0, safeY1);
+                safeX2 = Math.min(imgWidth, safeX2);
+                safeY2 = Math.min(imgHeight, safeY2);
+                
+                // 确保x1 <= x2且y1 <= y2
+                if (safeX1 > safeX2) { [safeX1, safeX2] = [safeX2, safeX1]; }
+                if (safeY1 > safeY2) { [safeY1, safeY2] = [safeY2, safeY1]; }
+                
+                // 创建转换后的区域对象
+                const convertedArea = {
+                    x1: safeX1,
+                    y1: safeY1,
+                    x2: safeX2,
+                    y2: safeY2,
+                    active: Boolean(cropArea.active) || false
+                };
+                
+                console.log('计算后的图像坐标:', convertedArea.x1, convertedArea.y1, convertedArea.x2, convertedArea.y2);
+                
+                // 保存结果
+                
+                return convertedArea;
+            } catch (error) {
+                console.error('计算图像坐标时出错:', error);
+                return null;
+            }
+                savedImageCoordinates = convertedArea;
+                
+                return convertedArea;
+            }
+            
+            // 执行OCR
+            async function performOCR() {
+                if (!currentImage) return;
+                
+                showLoading('识别中...');
+                
+                try {
+                    // 优先使用提前保存的图像坐标
+                    let actualCropArea = savedImageCoordinates;
+                    
+                    // 如果没有保存的坐标，尝试计算（作为备选）
+                    if (!actualCropArea) {
+                        console.log('使用备选方案：动态计算坐标');
+                        actualCropArea = calculateImageCoordinates(savedCropSelection || cropSelection);
+                    }
+                    
+                    // 如果计算仍失败，使用整个图像
+                    if (!actualCropArea) {
+                        console.log('无法计算框选区域，使用整个图像');
+                        const cropImage = document.getElementById('crop-image');
+                        actualCropArea = {
+                            x1: 0,
+                            y1: 0,
+                            x2: cropImage ? cropImage.naturalWidth || 1000 : 1000,
+                            y2: cropImage ? cropImage.naturalHeight || 1000 : 1000,
+                            active: true
+                        };
+                    }
+                    
+                    console.log('使用的图像坐标区域:', actualCropArea);
+                    
+                    // 准备请求数据，包含计算后的框选区域信息
+                    const requestData = {
+                        image: currentImage.split(',')[1],
+                        crop_area: actualCropArea
+                    };
+                    
+                    // 修改API端点为正确的后端地址
+                    const response = await fetch('http://localhost:5000/api/ocr', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(requestData),
+                        // 添加CORS支持
+                        credentials: 'include'
+                    });
+                    
+                    const data = await response.json();
+                    if (data.success) {
+                        resultText.value = data.text;
+                        resultPlaceholder.classList.add('hidden');
+                        resultContainer.classList.remove('hidden');
+                        updateTextStats();
+                        hideLoading();
+                        showToast('识别成功');
+                    } else {
+                        throw new Error(data.error || '识别失败');
+                    }
+                } catch (error) {
+                    console.error('OCR错误:', error);
+                    hideLoading();
+                    showToast('OCR识别失败', false);
+                }
+            }
+
+            // 执行表格识别
+            async function recognizeTable() {
+                if (!currentImage) return;
+                
+                showLoading('表格识别中...');
+                
+                try {
+                    // 优先使用提前保存的图像坐标
+                    let actualCropArea = savedImageCoordinates;
+                    
+                    // 如果没有保存的坐标，尝试计算（作为备选）
+                    if (!actualCropArea) {
+                        console.log('使用备选方案：动态计算坐标');
+                        actualCropArea = calculateImageCoordinates(savedCropSelection || cropSelection);
+                    }
+                    
+                    console.log('使用的图像坐标区域:', actualCropArea);
+                    
+                    // 准备请求数据，包含计算后的框选区域信息
+                    const requestData = {
+                        image: currentImage.split(',')[1],
+                        crop_area: actualCropArea
+                    };
+                    
+                    // 修改API端点为正确的后端地址
+                    const response = await fetch('http://localhost:5000/api/recognize-table', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(requestData),
+                        // 添加CORS支持
+                        credentials: 'include'
+                    });
+                    
+                    const data = await response.json();
+                    if (data.success) {
+                        // 显示表格结果
+                        if (data.table_html) {
+                            // 如果后端返回HTML格式的表格
+                            resultText.value = data.table_text;
+                            
+                            // 创建表格预览区域
+                            const tablePreview = document.createElement('div');
+                            tablePreview.className = 'mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200 overflow-x-auto table-preview';
+                            tablePreview.innerHTML = data.table_html;
+                            
+                            // 插入到结果容器中
+                            const resultContainer = document.getElementById('result-container');
+                            const existingTablePreview = resultContainer.querySelector('.table-preview');
+                            if (existingTablePreview) {
+                                existingTablePreview.remove();
+                            }
+                            resultContainer.appendChild(tablePreview);
+                        } else {
+                            // 纯文本形式的表格
+                            resultText.value = data.table_text || '无法识别表格结构';
+                        }
+                        
+                        resultPlaceholder.classList.add('hidden');
+                        resultContainer.classList.remove('hidden');
+                        updateTextStats();
+                        hideLoading();
+                        showToast('表格识别成功');
+                    } else {
+                        throw new Error(data.error || '表格识别失败');
+                    }
+                } catch (error) {
+                    console.error('表格识别错误:', error);
+                    hideLoading();
+                    showToast('表格识别失败', false);
+                }
+            }
+            
+            // 保存为Word文档
+            async function saveAsWord() {
+                if (!resultText.value.trim()) {
+                    showToast('没有内容可保存', false);
+                    return;
+                }
+                
+                showLoading('正在生成Word文档...');
+                
+                try {
+                    console.log('发送Word保存请求到/api/save-word');
+                    const response = await fetch('/api/save-word', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            text: resultText.value,
+                            // 如果有表格HTML，也一并发送
+                            has_table: document.querySelector('.table-preview') !== null
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        // 创建下载链接
+                        const blob = await response.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `ocr_result_${new Date().getTime()}.docx`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        
+                        hideLoading();
+                        showToast('Word文档保存成功');
+                    } else {
+                        throw new Error('生成Word文档失败');
+                    }
+                } catch (error) {
+                    console.error('Word保存错误:', error);
+                    hideLoading();
+                    showToast('保存Word文档失败', false);
+                    
+                    // 降级方案：如果后端API不可用，使用前端创建简单的文本文件
+                    const blob = new Blob([resultText.value], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `ocr_result_${new Date().getTime()}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
+            }
+
+            // 复制文本
+            function copyText() {
+                resultText.select();
+                document.execCommand('copy');
+                showToast('文本已复制到剪贴板');
+            }
+
+            // 文本纠错
+            async function fixText() {
+                const text = resultText.value.trim();
+                if (!text) return;
+                
+                showLoading('文本纠错中...');
+                
+                try {
+                    const response = await fetch('/api/fix-text', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            text: text
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    if (data.success) {
+                        resultText.value = data.text;
+                        updateTextStats();
+                        hideLoading();
+                        showToast('文本纠错完成');
+                    } else {
+                        throw new Error(data.error || '纠错失败');
+                    }
+                } catch (error) {
+                    console.error('纠错错误:', error);
+                    hideLoading();
+                    showToast('文本纠错失败', false);
+                }
+            }
+
+            // 下载文本
+            function downloadText() {
+                const text = resultText.value;
+                const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `docvision_result_${new Date().getTime()}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('文本已下载');
+            }
+
+            // 导航栏滚动效果
+            window.addEventListener('scroll', function() {
+                if (window.scrollY > 10) {
+                    navbar.classList.add('shadow-md');
+                    navbar.classList.remove('shadow-sm');
+                } else {
+                    navbar.classList.remove('shadow-md');
+                    navbar.classList.add('shadow-sm');
+                }
+            });
+
+            // 处理拖拽上传
+            function setupDragAndDrop() {
+                if (!imageContainer) return;
+                
+                imageContainer.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    imageContainer.classList.add('border-primary');
+                });
+                
+                imageContainer.addEventListener('dragleave', function() {
+                    imageContainer.classList.remove('border-primary');
+                });
+                
+                imageContainer.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    imageContainer.classList.remove('border-primary');
+                    
+                    if (e.dataTransfer.files.length > 0) {
+                        handleFileUpload(e.dataTransfer.files[0]);
+                    }
+                });
+            }
+
+            // 初始化拖拽上传
+            setupDragAndDrop();
+
+            // 安全地绑定事件监听器
+            function safeBindEvent(elementId, event, callback) {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    element.addEventListener(event, callback);
+                }
+            }
+            
+            // 重新上传图片
+            function triggerReupload() {
+                // 重置所有状态
+                currentImage = null;
+                currentRotation = 0;
+                currentStep = 0;
+                cropSelection = { x1: 0, y1: 0, x2: 0, y2: 0, active: false };
+                
+                // 重置UI
+                capturedImage.classList.add('hidden');
+                uploadPlaceholder.classList.remove('hidden');
+                rotateStage.classList.add('hidden');
+                cropStage.classList.add('hidden');
+                recognizeStage.classList.add('hidden');
+                resultPlaceholder.classList.remove('hidden');
+                resultContainer.classList.add('hidden');
+                resultText.value = '';
+                
+                // 重置步骤指示器
+                updateStepIndicator(0);
+                
+                // 触发文件选择
+                triggerFileUpload();
+            }
+
+            // 绑定所有事件监听器
+            safeBindEvent('rotate-left', 'click', () => quickRotate(-90));
+            safeBindEvent('rotate-right', 'click', () => quickRotate(90));
+            safeBindEvent('enhance-image', 'click', enhanceImage);
+            safeBindEvent('retake', 'click', triggerReupload);
+            safeBindEvent('start-ocr', 'click', performOCR);
+            safeBindEvent('recognize-table', 'click', recognizeTable);
+            safeBindEvent('copy-text', 'click', copyText);
+            safeBindEvent('fix-text', 'click', fixText);
+            safeBindEvent('download-text', 'click', downloadText);
+            safeBindEvent('upload-file', 'click', triggerFileUpload);
+            
+            // 步骤切换按钮事件
+            safeBindEvent('next-to-crop', 'click', enterCropStage);
+            safeBindEvent('back-to-rotate', 'click', enterRotateStage);
+            safeBindEvent('next-to-recognize', 'click', function() {
+                // 保存框选区域
+                savedCropSelection = {...cropSelection};
+                enterRecognizeStage();
+            });
+            
+            // 自定义旋转控件事件
+            const rotateSlider = document.getElementById('rotate-slider');
+            const rotateInput = document.getElementById('rotate-input');
+            const applyRotationBtn = document.getElementById('apply-rotation');
+            
+            if (rotateSlider && rotateInput) {
+                rotateSlider.addEventListener('input', function() {
+                    rotateInput.value = this.value;
+                    // 实时预览旋转
+                    const angle = parseInt(this.value) || 0;
+                    previewRotate(currentRotation + angle);
+                });
+                
+                rotateInput.addEventListener('input', function() {
+                    // 验证输入范围
+                    let value = parseInt(this.value);
+                    if (isNaN(value)) value = 0;
+                    if (value < -359) value = -359;
+                    if (value > 359) value = 359;
+                    this.value = value;
+                    rotateSlider.value = value;
+                    // 实时预览旋转
+                    previewRotate(currentRotation + value);
+                });
+                
+                if (applyRotationBtn) {
+                    applyRotationBtn.addEventListener('click', function() {
+                        const angle = parseInt(rotateInput.value) || 0;
+                        applyRotation(angle);
+                        // 应用后重置控件值
+                        rotateSlider.value = 0;
+                        rotateInput.value = 0;
+                    });
+                }
+            }
+            
+            // 绑定保存为Word文档事件
+            safeBindEvent('save-as-word', 'click', saveAsWord);
+            
+            // 点击上传区域触发文件选择
+            if (uploadPlaceholder) {
+                uploadPlaceholder.addEventListener('click', triggerFileUpload);
+            }
+            
+            if (imageContainer) {
+                imageContainer.addEventListener('click', function(e) {
+                    // 只有在显示上传占位符时才触发上传
+                    if (uploadPlaceholder && !uploadPlaceholder.classList.contains('hidden')) {
+                        triggerFileUpload();
+                    }
+                });
+            }
+            
+            // 文本区域变化事件
+            if (resultText) {
+                resultText.addEventListener('input', updateTextStats);
+            }
+        });
+    </script>
+</body>
+</html>
