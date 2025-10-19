@@ -204,11 +204,17 @@
                 <div id="recognize-stage" class="mt-6 hidden space-y-4">
                     <h4 class="text-center text-slate-600">选择识别类型</h4>
                     
+                    <!-- 自动识别与预览模式开关 -->
+                    <div class="flex items-center justify-center gap-4 text-sm text-slate-600">
+                        <label class="flex items-center gap-2"><input id="auto-ocr-toggle" type="checkbox" class="w-4 h-4" checked>实时自动识别</label>
+                        <label class="flex items-center gap-2"><input id="native-preview-toggle" type="checkbox" class="w-4 h-4">1:1像素预览</label>
+                    </div>
+                    
                     <!-- 框选区域预览 -->
                     <div id="crop-preview-container" class="bg-slate-50 rounded-lg border border-slate-200 p-3">
                         <h5 class="text-sm font-medium text-slate-600 mb-2">框选区域预览</h5>
-                        <div class="aspect-video bg-white rounded-lg overflow-hidden relative">
-                            <img id="crop-preview" class="w-full h-full object-contain" alt="框选区域预览">
+                        <div id="crop-preview-frame" class="bg-white rounded-lg overflow-auto border border-slate-200 max-h-[60vh] flex items-center justify-center">
+                            <img id="crop-preview" class="max-w-full h-auto" alt="框选区域预览">
                         </div>
                     </div>
                     
@@ -434,6 +440,21 @@
             const recognizeStage = document.getElementById('recognize-stage');
             const cropImage = document.getElementById('crop-image');
             const cropContainer = document.getElementById('crop-container');
+            const autoOcrToggle = document.getElementById('auto-ocr-toggle');
+            const nativePreviewToggle = document.getElementById('native-preview-toggle');
+            if (autoOcrToggle) {
+                autoOcrToggle.checked = true;
+                autoOcrToggle.addEventListener('change', () => {
+                    autoOCREnabled = autoOcrToggle.checked;
+                    if (autoOCREnabled) scheduleAutoOCR();
+                    try { createCropPreview(); } catch {}
+                });
+            }
+            if (nativePreviewToggle) {
+                nativePreviewToggle.addEventListener('change', () => {
+                    try { createCropPreview(); } catch {}
+                });
+            }
             
             // 步骤指示器元素
             const step1 = document.getElementById('step-1');
@@ -558,10 +579,11 @@
                     console.warn('自动应用预览旋转失败，继续进入框选:', e);
                 }
 
-                updateStepIndicator(3);
+                // 合并第三、第四步：进入裁剪界面时同时展示识别界面
+                updateStepIndicator(4);
                 rotateStage.classList.add('hidden');
                 cropStage.classList.remove('hidden');
-                recognizeStage.classList.add('hidden');
+                recognizeStage.classList.remove('hidden');
                 
                 // 设置裁剪图像（此时已应用旋转，确保为最新图像）
                 cropImage.src = currentImage;
@@ -572,6 +594,9 @@
                 // 初始化框选功能
                 initCropSelection();
                 
+                // 初次创建预览
+                try { createCropPreview(); } catch (e) { console.warn('初次预览失败:', e); }
+                
                 currentStep = 2;
             }
 
@@ -580,6 +605,7 @@
                 try {
                     const cropPreviewContainer = document.getElementById('crop-preview-container');
                     const previewImg = document.getElementById('crop-preview');
+                    const nativeToggle = document.getElementById('native-preview-toggle');
                     if (!previewImg || !cropPreviewContainer || !currentImage) return;
 
                     // 使用已计算的原始图像坐标；若不存在则尝试根据保存的DOM坐标计算
@@ -590,10 +616,11 @@
                         // 默认使用整图，若提供有效坐标则进行裁剪
                         let x1 = 0, y1 = 0, x2 = img.naturalWidth, y2 = img.naturalHeight;
                         if (area && Number.isFinite(area.x1) && Number.isFinite(area.y1) && Number.isFinite(area.x2) && Number.isFinite(area.y2)) {
-                            x1 = Math.max(0, Math.min(img.naturalWidth, Math.round(area.x1)));
-                            y1 = Math.max(0, Math.min(img.naturalHeight, Math.round(area.y1)));
-                            x2 = Math.max(0, Math.min(img.naturalWidth, Math.round(area.x2)));
-                            y2 = Math.max(0, Math.min(img.naturalHeight, Math.round(area.y2)));
+                            // 起点向下取整、终点向上取整，预览与实际裁剪一致覆盖边界像素
+                            x1 = Math.max(0, Math.min(img.naturalWidth, Math.floor(area.x1)));
+                            y1 = Math.max(0, Math.min(img.naturalHeight, Math.floor(area.y1)));
+                            x2 = Math.max(0, Math.min(img.naturalWidth, Math.ceil(area.x2)));
+                            y2 = Math.max(0, Math.min(img.naturalHeight, Math.ceil(area.y2)));
                             if (x2 <= x1 || y2 <= y1) {
                                 // 坐标无效时回退到整图
                                 x1 = 0; y1 = 0; x2 = img.naturalWidth; y2 = img.naturalHeight;
@@ -606,16 +633,34 @@
                         canvas.width = sw;
                         canvas.height = sh;
                         const ctx = canvas.getContext('2d');
+                        // 关闭平滑避免半像素插值导致边缘发虚
+                        ctx.imageSmoothingEnabled = false;
                         ctx.drawImage(img, x1, y1, sw, sh, 0, 0, sw, sh);
 
+                        // 设置预览显示模式：1:1像素 or 自适应
+                        const native = nativeToggle && nativeToggle.checked;
                         previewImg.src = canvas.toDataURL('image/png');
                         previewImg.alt = '框选区域预览';
+                        // 1:1像素预览：按裁剪原始尺寸呈现，滚动查看完整内容
+                        if (native) {
+                            previewImg.style.width = sw + 'px';
+                            previewImg.style.height = sh + 'px';
+                            previewImg.style.imageRendering = 'pixelated';
+                        } else {
+                            // 自适应：宽度撑满容器，高度自适应；保持完整显示
+                            previewImg.style.width = '100%';
+                            previewImg.style.height = 'auto';
+                            previewImg.style.imageRendering = 'auto';
+                        }
                         cropPreviewContainer.style.display = 'block';
                     };
                     img.onerror = (err) => {
                         console.error('加载原图用于预览失败:', err);
                         // 回退：仍显示整图
                         previewImg.src = currentImage;
+                        previewImg.style.width = '100%';
+                        previewImg.style.height = 'auto';
+                        previewImg.style.imageRendering = 'auto';
                         cropPreviewContainer.style.display = 'block';
                     };
                     img.src = currentImage;
@@ -624,11 +669,11 @@
                 }
             }
 
-            // 进入识别界面
+            // 识别界面已与裁剪界面合并，保留预览与坐标兜底逻辑
             function enterRecognizeStage() {
                 updateStepIndicator(4);
                 rotateStage.classList.add('hidden');
-                cropStage.classList.add('hidden');
+                cropStage.classList.remove('hidden');
                 recognizeStage.classList.remove('hidden');
                 currentStep = 3;
                 
@@ -691,7 +736,11 @@
                         if (!selectionBox) {
                             selectionBox = document.createElement('div');
                             selectionBox.className = 'absolute border-2 border-dashed border-primary bg-primary/20';
+                            // 避免视觉边界比坐标更大：宽高包含边框
+                            selectionBox.style.boxSizing = 'border-box';
                             cropContainer.appendChild(selectionBox);
+                            // 记录选框DOM引用，确保之后坐标计算与视觉一致
+                            cropSelectionBoxEl = selectionBox;
                         }
                         selectionBox.style.display = 'block';
                         updateSelectionBox();
@@ -705,6 +754,16 @@
                     cropSelection.x2 = e.clientX - rect.left;
                     cropSelection.y2 = e.clientY - rect.top;
                     updateSelectionBox();
+                    
+                    // 实时更新预览与自动识别（节流）
+                    const w = Math.abs(cropSelection.x2 - cropSelection.x1);
+                    const h = Math.abs(cropSelection.y2 - cropSelection.y1);
+                    if (w >= 20 && h >= 20) {
+                        savedCropSelection = { ...cropSelection };
+                        try { savedImageCoordinates = calculateImageCoordinates(savedCropSelection); } catch (e) {}
+                        try { createCropPreview(); } catch (e) {}
+                        scheduleAutoOCR();
+                    }
                 }
                 
                 function onMouseUp() {
@@ -713,8 +772,6 @@
                     // 确保选择框有最小尺寸
                     if (Math.abs(cropSelection.x2 - cropSelection.x1) < 10 || 
                         Math.abs(cropSelection.y2 - cropSelection.y1) < 10) {
-                        // 如果只是点击而非拖拽，不保存新的选择
-                        // 保留之前的选择（如果有）或者不执行任何操作
                         console.log('点击操作，未形成有效选择区域');
                         return;
                     }
@@ -728,6 +785,9 @@
                     console.log('立即计算并保存的图像坐标:', savedImageCoordinates);
                     
                     updateSelectionBox();
+                    // 同步更新预览并触发自动识别
+                    try { createCropPreview(); } catch (e) {}
+                    scheduleAutoOCR();
                 }
                 
                 function updateSelectionBox() {
@@ -865,6 +925,13 @@
                 
                 // 然后应用实际旋转
                 await applyRotation(angle);
+                
+                // 同步更新下方旋转角度控件为累计角度（例如：±90、±180）
+                const rotateSlider = document.getElementById('rotate-slider');
+                const rotateInput = document.getElementById('rotate-input');
+                if (rotateSlider) rotateSlider.value = currentRotation;
+                if (rotateInput) rotateInput.value = currentRotation;
+                console.log('快捷旋转完成，角度控件已更新为累计角度:', currentRotation);
             }
             
             // 图像增强函数
@@ -919,6 +986,23 @@
             let savedCropSelection = null;
             // 保存转换后的图像坐标
             let savedImageCoordinates = null;
+            // 选框DOM引用（用于精确读取渲染后的选框位置与尺寸）
+            let cropSelectionBoxEl = null;
+            // 调试：用于显示反投影的红色调试框
+            let cropDebugBoxEl = null;
+            const DEBUG_CROP = true;
+            
+            // 自动识别（合并裁剪与识别）
+            let autoOCREnabled = true;
+            let autoOCRTimer = null;
+            const AUTO_OCR_DEBOUNCE_MS = 600;
+            function scheduleAutoOCR() {
+                if (!autoOCREnabled) return;
+                if (autoOCRTimer) clearTimeout(autoOCRTimer);
+                autoOCRTimer = setTimeout(() => {
+                    performOCR(true).catch(() => {});
+                }, AUTO_OCR_DEBOUNCE_MS);
+            }
             
             // 修复版图像坐标计算函数
 function calculateImageCoordinates(cropArea) {
@@ -935,11 +1019,31 @@ function calculateImageCoordinates(cropArea) {
                         return null;
                     }
                     
-                    // 规范化框选坐标
-                    const x1 = Math.min(Number(cropArea.x1) || 0, Number(cropArea.x2) || 0);
-                    const y1 = Math.min(Number(cropArea.y1) || 0, Number(cropArea.y2) || 0);
-                    const x2 = Math.max(Number(cropArea.x1) || 0, Number(cropArea.x2) || 0);
-                    const y2 = Math.max(Number(cropArea.y1) || 0, Number(cropArea.y2) || 0);
+                    // 规范化框选坐标（初值取鼠标坐标）
+                    let x1 = Math.min(Number(cropArea.x1) || 0, Number(cropArea.x2) || 0);
+                    let y1 = Math.min(Number(cropArea.y1) || 0, Number(cropArea.y2) || 0);
+                    let x2 = Math.max(Number(cropArea.x1) || 0, Number(cropArea.x2) || 0);
+                    let y2 = Math.max(Number(cropArea.y1) || 0, Number(cropArea.y2) || 0);
+                    
+                    // 若有选框DOM，优先使用渲染后的实际位置与尺寸，确保与视觉完全一致
+                    if (cropSelectionBoxEl && cropContainer) {
+                        const boxRect = cropSelectionBoxEl.getBoundingClientRect();
+                        const contRect = cropContainer.getBoundingClientRect();
+                        const bx = boxRect.left - contRect.left;
+                        const by = boxRect.top - contRect.top;
+                        const bw = boxRect.width;
+                        const bh = boxRect.height;
+                        // 扣除边框厚度，确保裁剪使用选框内部可视区域
+                        const cs = window.getComputedStyle(cropSelectionBoxEl);
+                        const bl = parseFloat(cs.borderLeftWidth) || 0;
+                        const bt = parseFloat(cs.borderTopWidth) || 0;
+                        const br = parseFloat(cs.borderRightWidth) || 0;
+                        const bb = parseFloat(cs.borderBottomWidth) || 0;
+                        x1 = bx + bl;
+                        y1 = by + bt;
+                        x2 = bx + bw - br;
+                        y2 = by + bh - bb;
+                    }
                     
                     // 确保坐标有效
                     if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) {
@@ -1007,10 +1111,11 @@ function calculateImageCoordinates(cropArea) {
                     console.log('相对于图像的坐标:', relativeX1, relativeY1, relativeX2, relativeY2);
                     
                     // 转换到原始图像坐标
-                    let originalX1 = Math.round(relativeX1 * scaleX);
-                    let originalY1 = Math.round(relativeY1 * scaleY);
-                    let originalX2 = Math.round(relativeX2 * scaleX);
-                    let originalY2 = Math.round(relativeY2 * scaleY);
+                    // 使用起点向下取整、终点向上取整，避免边界被截断
+                    let originalX1 = Math.floor(relativeX1 * scaleX);
+                    let originalY1 = Math.floor(relativeY1 * scaleY);
+                    let originalX2 = Math.ceil(relativeX2 * scaleX);
+                    let originalY2 = Math.ceil(relativeY2 * scaleY);
                 
                 // 边界检查
                 let safeX1 = Math.max(0, originalX1);
@@ -1018,46 +1123,8 @@ function calculateImageCoordinates(cropArea) {
                 let safeX2 = Math.min(imgWidth, originalX2);
                 let safeY2 = Math.min(imgHeight, originalY2);
                 
-                // 针对旋转角度进行坐标调整 - 简化的旋转处理逻辑
-                if (rotation !== 0) {
-                    // 计算旋转后新的坐标
-                    let rotatedX1, rotatedY1, rotatedX2, rotatedY2;
-                    
-                    // 根据不同旋转角度应用转换
-                    if (rotation === 90) {
-                        // 90度顺时针旋转：(x,y) -> (y, height-x)
-                        rotatedX1 = safeY1;
-                        rotatedY1 = imgHeight - safeX2;
-                        rotatedX2 = safeY2;
-                        rotatedY2 = imgHeight - safeX1;
-                    } else if (rotation === 180) {
-                        // 180度旋转：(x,y) -> (width-x, height-y)
-                        rotatedX1 = imgWidth - safeX2;
-                        rotatedY1 = imgHeight - safeY2;
-                        rotatedX2 = imgWidth - safeX1;
-                        rotatedY2 = imgHeight - safeY1;
-                    } else if (rotation === 270) {
-                        // 270度顺时针旋转：(x,y) -> (width-y, x)
-                        rotatedX1 = imgWidth - safeY2;
-                        rotatedY1 = safeX1;
-                        rotatedX2 = imgWidth - safeY1;
-                        rotatedY2 = safeX2;
-                    }
-                    
-                    // 更新坐标
-                    if (rotatedX1 !== undefined) {
-                        safeX1 = rotatedX1;
-                        safeY1 = rotatedY1;
-                        safeX2 = rotatedX2;
-                        safeY2 = rotatedY2;
-                        
-                        // 重新应用边界检查
-                        safeX1 = Math.max(0, safeX1);
-                        safeY1 = Math.max(0, safeY1);
-                        safeX2 = Math.min(rotation === 90 || rotation === 270 ? imgHeight : imgWidth, safeX2);
-                        safeY2 = Math.min(rotation === 90 || rotation === 270 ? imgWidth : imgHeight, safeY2);
-                    }
-                }
+                // 旋转坐标调整移除：在进入框选前已对图像进行物理旋转，
+                // 此处无需再根据 currentRotation 做二次坐标映射，避免错位与边缘像素丢失。
                 
                 // 最终边界检查
                 safeX1 = Math.max(0, safeX1);
@@ -1080,6 +1147,26 @@ function calculateImageCoordinates(cropArea) {
                 
                 console.log('计算后的图像坐标:', convertedArea.x1, convertedArea.y1, convertedArea.x2, convertedArea.y2);
                 
+                // 调试：反投影到DOM，显示一个红色对比框，验证选框映射是否一致
+                if (DEBUG_CROP && cropContainer) {
+                    if (!cropDebugBoxEl) {
+                        cropDebugBoxEl = document.createElement('div');
+                        cropDebugBoxEl.className = 'absolute pointer-events-none';
+                        cropDebugBoxEl.style.border = '1px solid red';
+                        cropDebugBoxEl.style.boxSizing = 'border-box';
+                        cropDebugBoxEl.style.zIndex = '50';
+                        cropContainer.appendChild(cropDebugBoxEl);
+                    }
+                    const dbgX1 = imgX + (convertedArea.x1 / scaleX);
+                    const dbgY1 = imgY + (convertedArea.y1 / scaleY);
+                    const dbgX2 = imgX + (convertedArea.x2 / scaleX);
+                    const dbgY2 = imgY + (convertedArea.y2 / scaleY);
+                    cropDebugBoxEl.style.left = `${dbgX1}px`;
+                    cropDebugBoxEl.style.top = `${dbgY1}px`;
+                    cropDebugBoxEl.style.width = `${Math.max(0, dbgX2 - dbgX1)}px`;
+                    cropDebugBoxEl.style.height = `${Math.max(0, dbgY2 - dbgY1)}px`;
+                }
+                
                 // 保存结果
                 savedImageCoordinates = convertedArea;
                 return convertedArea;
@@ -1095,16 +1182,18 @@ function calculateImageCoordinates(cropArea) {
                     try {
                         const img = new Image();
                         img.onload = () => {
-                            const x1 = Math.max(0, Math.min(img.naturalWidth, Math.round(area.x1)));
-                            const y1 = Math.max(0, Math.min(img.naturalHeight, Math.round(area.y1)));
-                            const x2 = Math.max(0, Math.min(img.naturalWidth, Math.round(area.x2)));
-                            const y2 = Math.max(0, Math.min(img.naturalHeight, Math.round(area.y2)));
+                            const x1 = Math.max(0, Math.min(img.naturalWidth, Math.floor(area.x1)));
+                            const y1 = Math.max(0, Math.min(img.naturalHeight, Math.floor(area.y1)));
+                            const x2 = Math.max(0, Math.min(img.naturalWidth, Math.ceil(area.x2)));
+                            const y2 = Math.max(0, Math.min(img.naturalHeight, Math.ceil(area.y2)));
                             const w = Math.max(1, x2 - x1);
                             const h = Math.max(1, y2 - y1);
                             const canvas = document.createElement('canvas');
                             canvas.width = w;
                             canvas.height = h;
                             const ctx = canvas.getContext('2d');
+                            // 关闭平滑避免半像素插值导致边缘发虚
+                            ctx.imageSmoothingEnabled = false;
                             ctx.drawImage(img, x1, y1, w, h, 0, 0, w, h);
                             resolve(canvas.toDataURL('image/png'));
                         };
@@ -1117,10 +1206,10 @@ function calculateImageCoordinates(cropArea) {
             }
 
             // 执行OCR
-            async function performOCR() {
+            async function performOCR(quiet = false) {
                 if (!currentImage) return;
                 
-                showLoading('识别中...');
+                if (!quiet) showLoading('识别中...');
                 
                 try {
                     // 每次识别前都根据当前框选计算最新图像坐标，避免旧缓存导致整图识别
@@ -1151,20 +1240,22 @@ function calculateImageCoordinates(cropArea) {
                     
                     console.log('使用的图像坐标区域:', actualCropArea);
                     
-                    // 坐标取整，避免边界误差
-                    ['x1','y1','x2','y2'].forEach(k => actualCropArea[k] = Math.round(actualCropArea[k] || 0));
+                    // 坐标取整：起点向下取整、终点向上取整，避免边界被截断
+                    actualCropArea.x1 = Math.floor(actualCropArea.x1 || 0);
+                    actualCropArea.y1 = Math.floor(actualCropArea.y1 || 0);
+                    actualCropArea.x2 = Math.ceil(actualCropArea.x2 || 0);
+                    actualCropArea.y2 = Math.ceil(actualCropArea.y2 || 0);
 
                     // 最小框选校验，避免发送过小或无效区域
                     const areaW = Math.max(0, actualCropArea.x2 - actualCropArea.x1);
                     const areaH = Math.max(0, actualCropArea.y2 - actualCropArea.y1);
                     if (areaW < 20 || areaH < 20) {
-                        hideLoading();
-                        showToast('选择区域过小或无效，请重新框选', false);
+                        if (!quiet) { hideLoading(); showToast('选择区域过小或无效，请重新框选', false); }
                         return;
                     }
 
                     // 在UI提示当前裁剪坐标，便于确认与预览一致
-                    showToast(`裁剪坐标: x1=${actualCropArea.x1}, y1=${actualCropArea.y1}, x2=${actualCropArea.x2}, y2=${actualCropArea.y2}`);
+                    if (!quiet) showToast(`裁剪坐标: x1=${actualCropArea.x1}, y1=${actualCropArea.y1}, x2=${actualCropArea.x2}, y2=${actualCropArea.y2}`);
                     
                     // 直接在前端裁剪并发送裁剪后的图像，彻底避免坐标换算误差
                     const croppedDataUrl = await getCroppedImageBase64(currentImage, actualCropArea);
@@ -1189,15 +1280,14 @@ function calculateImageCoordinates(cropArea) {
                         resultPlaceholder.classList.add('hidden');
                         resultContainer.classList.remove('hidden');
                         updateTextStats();
-                        hideLoading();
-                        showToast('识别成功');
+                        if (!quiet) hideLoading();
+                        if (!quiet) showToast('识别成功');
                     } else {
                         throw new Error(data.error || '识别失败');
                     }
                 } catch (error) {
                     console.error('OCR错误:', error);
-                    hideLoading();
-                    showToast('OCR识别失败', false);
+                    if (!quiet) { hideLoading(); showToast('OCR识别失败', false); }
                 }
             }
 
@@ -1212,8 +1302,11 @@ function calculateImageCoordinates(cropArea) {
                     let actualCropArea = calculateImageCoordinates(savedCropSelection || cropSelection);
                     console.log('计算得到的裁剪区域(像素坐标):', actualCropArea);
                     
-                    // 坐标取整，避免边界误差
-                    ['x1','y1','x2','y2'].forEach(k => actualCropArea[k] = Math.round(actualCropArea[k] || 0));
+                    // 坐标取整：起点向下取整、终点向上取整，避免边界被截断
+                    actualCropArea.x1 = Math.floor(actualCropArea.x1 || 0);
+                    actualCropArea.y1 = Math.floor(actualCropArea.y1 || 0);
+                    actualCropArea.x2 = Math.ceil(actualCropArea.x2 || 0);
+                    actualCropArea.y2 = Math.ceil(actualCropArea.y2 || 0);
 
                     // 最小框选校验，避免发送过小或无效区域
                     const areaW = Math.max(0, actualCropArea.x2 - actualCropArea.x1);
@@ -1494,7 +1587,7 @@ function calculateImageCoordinates(cropArea) {
             safeBindEvent('rotate-right', 'click', () => quickRotate(90));
             safeBindEvent('enhance-image', 'click', enhanceImage);
             safeBindEvent('retake', 'click', triggerReupload);
-            safeBindEvent('start-ocr', 'click', performOCR);
+            safeBindEvent('start-ocr', 'click', () => performOCR(false));
             safeBindEvent('recognize-table', 'click', recognizeTable);
             safeBindEvent('copy-text', 'click', copyText);
             safeBindEvent('fix-text', 'click', fixText);
@@ -1508,9 +1601,28 @@ function calculateImageCoordinates(cropArea) {
                 enterRotateStage();
             });
             safeBindEvent('next-to-recognize', 'click', function() {
-                // 保存框选区域
-                savedCropSelection = {...cropSelection};
-                enterRecognizeStage();
+                // 若未框选则默认整图；有框选则保存并计算坐标
+                const w = Math.abs(cropSelection.x2 - cropSelection.x1);
+                const h = Math.abs(cropSelection.y2 - cropSelection.y1);
+                const hasSelection = w > 0 && h > 0;
+                if (hasSelection) {
+                    savedCropSelection = { ...cropSelection };
+                    try {
+                        savedImageCoordinates = calculateImageCoordinates(savedCropSelection);
+                        console.log('进入识别前使用已框选坐标:', savedImageCoordinates);
+                    } catch (e) {
+                        console.warn('进入识别前计算坐标失败，后续按整图处理');
+                        savedImageCoordinates = null;
+                    }
+                } else {
+                    savedCropSelection = null;
+                    savedImageCoordinates = null;
+                    showToast('未框选，默认使用整图');
+                }
+                // 合并步骤：不切换界面，直接刷新预览并执行识别
+                recognizeStage.classList.remove('hidden');
+                try { createCropPreview(); } catch (e) {}
+                performOCR(false);
             });
             
             // 自定义旋转控件事件
@@ -1519,11 +1631,12 @@ function calculateImageCoordinates(cropArea) {
             const applyRotationBtn = document.getElementById('apply-rotation');
             
             if (rotateSlider && rotateInput) {
+                // 控件值表示“目标累计角度”，预览应抵消当前累计角度，使视觉与目标一致
                 rotateSlider.addEventListener('input', function() {
-                    rotateInput.value = this.value;
-                    // 实时预览旋转
-                    const angle = parseInt(this.value) || 0;
-                    previewRotate(currentRotation + angle);
+                    const value = parseInt(this.value) || 0;
+                    rotateInput.value = value;
+                    // 预览为：目标累计角度 - 当前累计角度（抵消已应用的物理旋转）
+                    previewRotate(value - currentRotation);
                 });
                 
                 rotateInput.addEventListener('input', function() {
@@ -1534,17 +1647,29 @@ function calculateImageCoordinates(cropArea) {
                     if (value > 359) value = 359;
                     this.value = value;
                     rotateSlider.value = value;
-                    // 实时预览旋转
-                    previewRotate(currentRotation + value);
+                    // 预览为：目标累计角度 - 当前累计角度
+                    previewRotate(value - currentRotation);
                 });
                 
                 if (applyRotationBtn) {
-                    applyRotationBtn.addEventListener('click', function() {
-                        const angle = parseInt(rotateInput.value) || 0;
-                        applyRotation(angle);
-                        // 应用后重置控件值
-                        rotateSlider.value = 0;
-                        rotateInput.value = 0;
+                    applyRotationBtn.addEventListener('click', async function() {
+                        const desired = parseInt(rotateInput.value) || 0; // 目标累计角度
+                        let delta = desired - currentRotation;            // 仅按增量应用
+                        // 规范化到[-360, 360]
+                        if (!isNaN(delta)) {
+                            delta = ((delta % 360) + 360) % 360; // -> [0,360)
+                            if (delta > 180) delta -= 360;       // -> [-180,180]
+                        }
+                        if (Math.abs(delta) < 0.1) {
+                            showToast('角度未改变');
+                            return;
+                        }
+                        await applyRotation(delta);
+                        // 应用后将控件更新为新的累计角度
+                        rotateSlider.value = currentRotation;
+                        rotateInput.value = currentRotation;
+                        // 应用后清除CSS预览（回到零预览偏移）
+                        capturedImage.style.transform = `rotate(${currentRotation}deg)`;
                     });
                 }
             }
