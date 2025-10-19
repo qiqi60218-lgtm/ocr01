@@ -6,7 +6,7 @@
     <title>DocVision AI - 智能文档识别系统</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    <!-- Chart.js temporarily disabled for syntax error isolation -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- Tailwind配置 -->
@@ -401,6 +401,15 @@
         </div>
     </div>
 
+    <!-- 全局错误捕获 -->
+    <script>
+       window.addEventListener('error', function(e) {
+         const loc = (e.filename || 'inline') + ':' + e.lineno + ':' + e.colno;
+         console.log('GlobalError:', e.message, 'at', loc);
+         alert('GlobalError: ' + e.message + '\n' + loc);
+       });
+     </script>
+
     <!-- 主要JavaScript -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -440,6 +449,10 @@
             let currentRotation = 0;
             let currentStep = 0; // 0: 初始状态, 1: 上传完成, 2: 旋转完成, 3: 框选完成
             let cropSelection = { x1: 0, y1: 0, x2: 0, y2: 0, active: false };
+            // 自动应用预览旋转的回退状态
+            let prevImageBeforeAutoApply = null;
+            let prevRotationBeforeAutoApply = 0;
+            let autoAppliedFromNext = false;
 
             // 显示通知
             function showToast(message, isSuccess = true) {
@@ -476,12 +489,14 @@
             // 更新步骤指示器
             function updateStepIndicator(step) {
                 // 重置所有步骤
-                [step1, step2, step3, step4].forEach(el => {
-                    el.className = 'w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium';
-                });
-                [stepLine12, stepLine23, stepLine34].forEach(el => {
-                    el.className = 'h-1 bg-slate-200 w-full';
-                });
+                const steps = [step1, step2, step3, step4];
+                for (let i = 0; i < steps.length; i++) {
+                    steps[i].className = 'w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium';
+                }
+                const lines = [stepLine12, stepLine23, stepLine34];
+                for (let j = 0; j < lines.length; j++) {
+                    lines[j].className = 'h-1 bg-slate-200 w-full';
+                }
                 
                 // 设置当前步骤
                 if (step >= 1) {
@@ -510,14 +525,45 @@
                 currentStep = 1;
             }
 
-            // 进入框选界面
-            function enterCropStage() {
+            // 进入框选界面（自动应用未提交的预览旋转）
+            async function enterCropStage() {
+                // 若存在未应用的预览旋转（CSS），在切入框选前自动应用到实际图像
+                try {
+                    const transform = (capturedImage && capturedImage.style && capturedImage.style.transform) || '';
+                    let previewAngle = currentRotation;
+                    const match = transform.match(/rotate\(([-\d.]+)deg\)/);
+                    if (match) {
+                        previewAngle = parseFloat(match[1]) || 0;
+                    }
+                    let delta = previewAngle - currentRotation;
+                    // 规范化到[-360, 360]
+                    if (!isNaN(delta)) {
+                        delta = ((delta % 360) + 360) % 360; // 转为[0,360)
+                        if (delta > 180) delta -= 360;       // 映射到[-180,180]
+                    }
+                    if (Math.abs(delta) > 0.1) {
+                         console.log('检测到未应用的预览旋转，自动应用:', delta);
+                         // 保存回退状态，便于从第三步返回第二步时恢复原图
+                         prevImageBeforeAutoApply = currentImage;
+                         prevRotationBeforeAutoApply = currentRotation;
+                         autoAppliedFromNext = true;
+                         await applyRotation(delta);
+                         // 应用后重置控件数值
+                         const rotateSlider = document.getElementById('rotate-slider');
+                         const rotateInput = document.getElementById('rotate-input');
+                         if (rotateSlider) rotateSlider.value = 0;
+                         if (rotateInput) rotateInput.value = 0;
+                     }
+                } catch (e) {
+                    console.warn('自动应用预览旋转失败，继续进入框选:', e);
+                }
+
                 updateStepIndicator(3);
                 rotateStage.classList.add('hidden');
                 cropStage.classList.remove('hidden');
                 recognizeStage.classList.add('hidden');
                 
-                // 设置裁剪图像
+                // 设置裁剪图像（此时已应用旋转，确保为最新图像）
                 cropImage.src = currentImage;
                 
                 // 重置裁剪选择
@@ -529,205 +575,52 @@
                 currentStep = 2;
             }
 
-            // 全新实现的图片裁剪预览函数
+            // 全新实现的图片裁剪预览函数（按框选区域裁剪生成预览）
             function createCropPreview() {
-                // 获取预览相关元素并初始化
-                const cropPreviewContainer = document.getElementById('crop-preview-container');
-                const previewImg = document.getElementById('crop-preview');
-                const cropImage = document.getElementById('crop-image');
-                
-                // 初始化变量，确保所有变量都有初始值
-                let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-                let displayWidth = 0, displayHeight = 0;
-                let imgWidth = 0, imgHeight = 0;
-                let scaleX = 1, scaleY = 1;
-                let safeX1 = 0, safeY1 = 0, safeX2 = 0, safeY2 = 0;
-                let width = 0, height = 0;
-                
-                // 全面参数验证，每个条件都有详细日志
-                if (!previewImg) {
-                    console.error('找不到预览图片元素');
-                    return;
-                }
-                
-                if (!cropPreviewContainer) {
-                    console.error('找不到预览容器元素');
-                    previewImg.alt = '找不到预览容器';
-                    return;
-                }
-                
-                if (!savedCropSelection || typeof savedCropSelection !== 'object') {
-                    console.error('保存的裁剪区域无效:', savedCropSelection);
-                    previewImg.alt = '没有选择区域';
-                    return;
-                }
-                
-                // 检查裁剪区域是否有必要的属性
-                if (savedCropSelection.x1 === undefined || savedCropSelection.y1 === undefined || 
-                    savedCropSelection.x2 === undefined || savedCropSelection.y2 === undefined) {
-                    console.error('裁剪区域缺少必要的坐标属性:', savedCropSelection);
-                    previewImg.alt = '无效的选择区域';
-                    return;
-                }
-                
-                if (!currentImage) {
-                    console.error('没有当前图像');
-                    previewImg.alt = '没有图像';
-                    return;
-                }
-                
-                if (!cropImage) {
-                    console.error('找不到裁剪图像元素');
-                    previewImg.alt = '找不到裁剪图像';
-                    return;
-                }
-                
-                console.log('开始创建框选预览，裁剪区域:', JSON.stringify(savedCropSelection));
-                
                 try {
-                    // 计算框选区域坐标
-                    x1 = Math.min(Number(savedCropSelection.x1) || 0, Number(savedCropSelection.x2) || 0);
-                    y1 = Math.min(Number(savedCropSelection.y1) || 0, Number(savedCropSelection.y2) || 0);
-                    x2 = Math.max(Number(savedCropSelection.x1) || 0, Number(savedCropSelection.x2) || 0);
-                    y2 = Math.max(Number(savedCropSelection.y1) || 0, Number(savedCropSelection.y2) || 0);
-                    
-                    // 立即检查坐标有效性
-                    if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) {
-                        console.error('无效的坐标值:', x1, y1, x2, y2);
-                        previewImg.alt = '无效的坐标';
-                        return;
-                    }
-                    
-                    // 创建画布和图像对象
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
+                    const cropPreviewContainer = document.getElementById('crop-preview-container');
+                    const previewImg = document.getElementById('crop-preview');
+                    if (!previewImg || !cropPreviewContainer || !currentImage) return;
+
+                    // 使用已计算的原始图像坐标；若不存在则尝试根据保存的DOM坐标计算
+                    const area = savedImageCoordinates || (savedCropSelection ? calculateImageCoordinates(savedCropSelection) : null);
+
                     const img = new Image();
-                    
-                    // 设置跨域访问
-                    img.crossOrigin = 'anonymous';
-                    
-                    // 图片加载完成后的处理函数
-                    img.onload = function() {
-                        try {
-                            // 直接使用img的原始尺寸，不依赖于显示尺寸
-                            imgWidth = img.naturalWidth || 0;
-                            imgHeight = img.naturalHeight || 0;
-                            
-                            // 获取裁剪容器的实际尺寸作为基准
-                            const containerRect = cropContainer ? cropContainer.getBoundingClientRect() : {width: 0, height: 0};
-                            displayWidth = containerRect.width || imgWidth; // 备用值使用图像原始宽度
-                            displayHeight = containerRect.height || imgHeight; // 备用值使用图像原始高度
-                            
-                            // 只检查原始图像尺寸的有效性
-                            if (imgWidth <= 0 || imgHeight <= 0) {
-                                console.error('无效的图像原始尺寸:', imgWidth, imgHeight);
-                                previewImg.alt = '图像原始尺寸无效';
-                                return;
+                    img.onload = () => {
+                        // 默认使用整图，若提供有效坐标则进行裁剪
+                        let x1 = 0, y1 = 0, x2 = img.naturalWidth, y2 = img.naturalHeight;
+                        if (area && Number.isFinite(area.x1) && Number.isFinite(area.y1) && Number.isFinite(area.x2) && Number.isFinite(area.y2)) {
+                            x1 = Math.max(0, Math.min(img.naturalWidth, Math.round(area.x1)));
+                            y1 = Math.max(0, Math.min(img.naturalHeight, Math.round(area.y1)));
+                            x2 = Math.max(0, Math.min(img.naturalWidth, Math.round(area.x2)));
+                            y2 = Math.max(0, Math.min(img.naturalHeight, Math.round(area.y2)));
+                            if (x2 <= x1 || y2 <= y1) {
+                                // 坐标无效时回退到整图
+                                x1 = 0; y1 = 0; x2 = img.naturalWidth; y2 = img.naturalHeight;
                             }
-                            
-                            // 计算缩放比例，避免除零错误
-                            scaleX = (displayWidth > 0) ? imgWidth / displayWidth : 1;
-                            scaleY = (displayHeight > 0) ? imgHeight / displayHeight : 1;
-                            
-                            console.log('框选区域坐标:', x1, y1, x2, y2);
-                            console.log('图像显示尺寸:', displayWidth, 'x', displayHeight);
-                            console.log('图像原始尺寸:', imgWidth, 'x', imgHeight);
-                            console.log('缩放比例:', scaleX, 'x', scaleY);
-                            
-                            // 计算原始图像坐标
-                            const originalX1 = Math.round(x1 * scaleX);
-                            const originalY1 = Math.round(y1 * scaleY);
-                            const originalX2 = Math.round(x2 * scaleX);
-                            const originalY2 = Math.round(y2 * scaleY);
-                            
-                            // 边界检查
-                            safeX1 = Math.max(0, originalX1);
-                            safeY1 = Math.max(0, originalY1);
-                            safeX2 = Math.min(imgWidth, originalX2);
-                            safeY2 = Math.min(imgHeight, originalY2);
-                            
-                            // 计算裁剪尺寸
-                            width = safeX2 - safeX1;
-                            height = safeY2 - safeY1;
-                            
-                            console.log('裁剪区域原始坐标:', safeX1, safeY1, safeX2, safeY2);
-                            console.log('裁剪尺寸:', width, 'x', height);
-                            
-                            // 确保尺寸有效
-                            if (width <= 0 || height <= 0 || isNaN(width) || isNaN(height)) {
-                                console.error('无效的裁剪尺寸:', width, 'x', height);
-                                previewImg.alt = '无效的裁剪区域';
-                                return;
-                            }
-                            
-                            // 设置画布尺寸
-                            canvas.width = width;
-                            canvas.height = height;
-                            
-                            // 清理画布
-                            ctx.clearRect(0, 0, canvas.width, canvas.height);
-                            
-                            // 安全绘制图像
-                            try {
-                                ctx.drawImage(
-                                    img,       // 图像源
-                                    safeX1,    // 源图像x坐标
-                                    safeY1,    // 源图像y坐标
-                                    width,     // 源图像宽度
-                                    height,    // 源图像高度
-                                    0,         // 目标x坐标
-                                    0,         // 目标y坐标
-                                    width,     // 目标宽度
-                                    height     // 目标高度
-                                );
-                                
-                                // 生成预览数据
-                                try {
-                                    const dataURL = canvas.toDataURL('image/png');
-                                    console.log('成功生成数据URL');
-                                    
-                                    // 显示预览
-                                    previewImg.onload = function() {
-                                        console.log('预览图片加载成功');
-                                        cropPreviewContainer.style.display = 'block';
-                                    };
-                                    
-                                    previewImg.onerror = function() {
-                                        console.error('预览图片加载失败');
-                                        previewImg.alt = '预览加载失败';
-                                    };
-                                    
-                                    previewImg.src = dataURL;
-                                    previewImg.alt = '框选区域预览';
-                                    
-                                } catch (e) {
-                                    console.error('生成数据URL失败:', e);
-                                    previewImg.alt = '生成预览失败';
-                                }
-                                
-                            } catch (drawError) {
-                                console.error('绘制图像失败:', drawError);
-                                previewImg.alt = '绘制预览失败';
-                            }
-                            
-                        } catch (loadError) {
-                            console.error('处理图像加载结果出错:', loadError);
-                            previewImg.alt = '处理图像失败';
                         }
+                        const sw = x2 - x1;
+                        const sh = y2 - y1;
+
+                        const canvas = document.createElement('canvas');
+                        canvas.width = sw;
+                        canvas.height = sh;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, x1, y1, sw, sh, 0, 0, sw, sh);
+
+                        previewImg.src = canvas.toDataURL('image/png');
+                        previewImg.alt = '框选区域预览';
+                        cropPreviewContainer.style.display = 'block';
                     };
-                    
-                    img.onerror = function() {
-                        console.error('原始图像加载失败');
-                        previewImg.alt = '图像加载失败';
+                    img.onerror = (err) => {
+                        console.error('加载原图用于预览失败:', err);
+                        // 回退：仍显示整图
+                        previewImg.src = currentImage;
+                        cropPreviewContainer.style.display = 'block';
                     };
-                    
-                    // 设置图片源
-                    console.log('加载原始图像');
                     img.src = currentImage;
-                    
-                } catch (initError) {
-                    console.error('初始化裁剪预览失败:', initError);
-                    if (previewImg) previewImg.alt = '初始化失败';
+                } catch (e) {
+                    console.error('初始化裁剪预览失败:', e);
                 }
             }
 
@@ -739,8 +632,21 @@
                 recognizeStage.classList.remove('hidden');
                 currentStep = 3;
                 
-                // 创建并显示框选区域预览
+                // 创建并显示框选区域预览（优先使用已保存的坐标）
                 createCropPreview();
+                
+                // 不再在识别界面重新计算坐标，避免容器隐藏导致的1x1尺寸误差
+                if (savedImageCoordinates) {
+                    console.log('进入识别界面，沿用已保存的图像坐标:', savedImageCoordinates);
+                } else if (savedCropSelection) {
+                    // 若尚未计算，则在进入识别界面前（容器可见时）应已计算；此处仅兜底
+                    try {
+                        savedImageCoordinates = calculateImageCoordinates(savedCropSelection);
+                        console.log('识别界面兜底计算图像坐标:', savedImageCoordinates);
+                    } catch (e) {
+                        console.warn('识别界面兜底计算坐标失败，后续将按整图处理');
+                    }
+                }
             }
 
             // 初始化框选功能
@@ -901,14 +807,20 @@
                 showLoading('旋转中...');
                 
                 try {
-                    const response = await fetch('/api/rotate', {
+                    // 统一旋转方向：CSS预览的正角为顺时针；OpenCV一般角度正角为逆时针
+                    // 对非90度倍数的角度取反，保持与预览一致
+                    const near90 = Math.abs(Math.round(angle / 90) * 90 - angle) < 0.1;
+                    const sendAngle = near90 ? angle : -angle;
+                    console.log('应用旋转角度(发送到后端):', sendAngle, '预览角度:', angle);
+
+                    const response = await fetch('http://localhost:5000/api/rotate', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
                             image: currentImage.split(',')[1],
-                            angle: angle
+                            angle: sendAngle
                         })
                     });
                     
@@ -916,14 +828,24 @@
                     if (data.success) {
                         currentImage = data.image;
                         capturedImage.src = currentImage;
+                        // 同步更新裁剪阶段图像，确保第三步看到的是旋转后的图
+                        const cropImgEl = document.getElementById('crop-image');
+                        if (cropImgEl) {
+                            cropImgEl.src = currentImage;
+                            console.log('裁剪阶段图像已同步更新(旋转后):', cropImgEl.src.substring(0, 60) + '...');
+                        }
                         // 移除CSS旋转效果
                         capturedImage.style.transform = 'none';
                         
                         // 更新当前旋转角度
                         currentRotation = (currentRotation + angle) % 360;
                         
+                        // 旋转后清空旧的框选和坐标，避免错位
+                        savedCropSelection = null;
+                        savedImageCoordinates = null;
+                        
                         hideLoading();
-                        showToast('旋转成功');
+                        showToast('旋转成功，请重新框选区域');
                     } else {
                         throw new Error(data.error || '旋转失败');
                     }
@@ -954,7 +876,7 @@
                 try {
                     // 这里我们复用旋转API，因为它已经包含了图像处理和返回的逻辑
                     // 在实际应用中，最好创建一个专门的增强API
-                    const response = await fetch('/api/rotate', {
+                    const response = await fetch('http://localhost:5000/api/rotate', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -970,8 +892,19 @@
                     if (data.success) {
                         currentImage = data.image;
                         capturedImage.src = currentImage;
+                        // 同步更新裁剪阶段图像，确保第三步看到的是增强后的图
+                        const cropImgEl = document.getElementById('crop-image');
+                        if (cropImgEl) {
+                            cropImgEl.src = currentImage;
+                            console.log('裁剪阶段图像已同步更新(增强后):', cropImgEl.src.substring(0, 60) + '...');
+                        }
+                        
+                        // 增强后清空旧的框选和坐标，避免尺寸/像素变化导致失效
+                        savedCropSelection = null;
+                        savedImageCoordinates = null;
+                        
                         hideLoading();
-                        showToast('图像清晰度提升成功');
+                        showToast('图像清晰度提升成功，请重新框选区域');
                     } else {
                         throw new Error(data.error || '增强失败');
                     }
@@ -988,7 +921,7 @@
             let savedImageCoordinates = null;
             
             // 修复版图像坐标计算函数
-            function calculateImageCoordinates(cropArea) {
+function calculateImageCoordinates(cropArea) {
                 try {
                     // 参数验证
                     if (!cropArea || !cropContainer || !currentImage) {
@@ -1018,15 +951,38 @@
                     const imgRect = cropImage.getBoundingClientRect();
                     const containerRect = cropContainer.getBoundingClientRect();
                     
-                    // 计算图像在容器内的实际位置
-                    const imgX = imgRect.left - containerRect.left;
-                    const imgY = imgRect.top - containerRect.top;
-                    const displayWidth = imgRect.width || 1;
-                    const displayHeight = imgRect.height || 1;
+                    // 初始使用真实DOM尺寸
+                    let displayWidth = imgRect.width;
+                    let displayHeight = imgRect.height;
+                    let imgX = imgRect.left - containerRect.left;
+                    let imgY = imgRect.top - containerRect.top;
                     
-                    // 直接使用cropImage的naturalWidth/Height获取原始尺寸
+                    // 原始尺寸
                     const imgWidth = cropImage.naturalWidth || 1;
                     const imgHeight = cropImage.naturalHeight || 1;
+                    
+                    // 若DOM尺寸异常过小（例如未完成布局或隐藏导致为0/1），按object-contain规则回退计算显示尺寸与偏移
+                    if (!displayWidth || displayWidth < 5 || !displayHeight || displayHeight < 5) {
+                        const containerW = containerRect.width || 1;
+                        const containerH = containerRect.height || 1;
+                        const ar = imgWidth / imgHeight;
+                        let fallbackW, fallbackH;
+                        if (containerW / containerH > ar) {
+                            // 容器更宽，充满高度
+                            fallbackH = containerH;
+                            fallbackW = containerH * ar;
+                        } else {
+                            // 容器更高，充满宽度
+                            fallbackW = containerW;
+                            fallbackH = containerW / ar;
+                        }
+                        displayWidth = Math.max(1, Math.round(fallbackW));
+                        displayHeight = Math.max(1, Math.round(fallbackH));
+                        // object-contain通常居中显示，计算左上偏移
+                        imgX = Math.round((containerW - displayWidth) / 2);
+                        imgY = Math.round((containerH - displayHeight) / 2);
+                        console.warn('触发显示尺寸回退: ', {displayWidth, displayHeight, imgX, imgY, containerW, containerH});
+                    }
                     
                     // 考虑旋转角度
                     const rotation = Math.abs(currentRotation) % 360;
@@ -1043,18 +999,18 @@
                 console.log('框选DOM坐标:', x1, y1, x2, y2);
                 
                 // 计算相对于图像的坐标（考虑图像在容器中的位置）
-                const relativeX1 = Math.max(0, x1 - imgX);
-                const relativeY1 = Math.max(0, y1 - imgY);
-                const relativeX2 = Math.min(displayWidth, x2 - imgX);
-                const relativeY2 = Math.min(displayHeight, y2 - imgY);
-                
-                console.log('相对于图像的坐标:', relativeX1, relativeY1, relativeX2, relativeY2);
-                
-                // 转换到原始图像坐标
-                let originalX1 = Math.round(relativeX1 * scaleX);
-                let originalY1 = Math.round(relativeY1 * scaleY);
-                let originalX2 = Math.round(relativeX2 * scaleX);
-                let originalY2 = Math.round(relativeY2 * scaleY);
+                    const relativeX1 = Math.max(0, x1 - imgX);
+                    const relativeY1 = Math.max(0, y1 - imgY);
+                    const relativeX2 = Math.min(displayWidth, x2 - imgX);
+                    const relativeY2 = Math.min(displayHeight, y2 - imgY);
+                    
+                    console.log('相对于图像的坐标:', relativeX1, relativeY1, relativeX2, relativeY2);
+                    
+                    // 转换到原始图像坐标
+                    let originalX1 = Math.round(relativeX1 * scaleX);
+                    let originalY1 = Math.round(relativeY1 * scaleY);
+                    let originalX2 = Math.round(relativeX2 * scaleX);
+                    let originalY2 = Math.round(relativeY2 * scaleY);
                 
                 // 边界检查
                 let safeX1 = Math.max(0, originalX1);
@@ -1125,17 +1081,41 @@
                 console.log('计算后的图像坐标:', convertedArea.x1, convertedArea.y1, convertedArea.x2, convertedArea.y2);
                 
                 // 保存结果
-                
+                savedImageCoordinates = convertedArea;
                 return convertedArea;
             } catch (error) {
                 console.error('计算图像坐标时出错:', error);
                 return null;
             }
-                savedImageCoordinates = convertedArea;
-                
-                return convertedArea;
             }
-            
+
+            // 生成裁剪后的图片（直接在前端裁剪并发送）
+            async function getCroppedImageBase64(base64Image, area) {
+                return new Promise((resolve, reject) => {
+                    try {
+                        const img = new Image();
+                        img.onload = () => {
+                            const x1 = Math.max(0, Math.min(img.naturalWidth, Math.round(area.x1)));
+                            const y1 = Math.max(0, Math.min(img.naturalHeight, Math.round(area.y1)));
+                            const x2 = Math.max(0, Math.min(img.naturalWidth, Math.round(area.x2)));
+                            const y2 = Math.max(0, Math.min(img.naturalHeight, Math.round(area.y2)));
+                            const w = Math.max(1, x2 - x1);
+                            const h = Math.max(1, y2 - y1);
+                            const canvas = document.createElement('canvas');
+                            canvas.width = w;
+                            canvas.height = h;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, x1, y1, w, h, 0, 0, w, h);
+                            resolve(canvas.toDataURL('image/png'));
+                        };
+                        img.onerror = (e) => reject(e);
+                        img.src = base64Image;
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+            }
+
             // 执行OCR
             async function performOCR() {
                 if (!currentImage) return;
@@ -1143,18 +1123,21 @@
                 showLoading('识别中...');
                 
                 try {
-                    // 优先使用提前保存的图像坐标
-                    let actualCropArea = savedImageCoordinates;
-                    
-                    // 如果没有保存的坐标，尝试计算（作为备选）
+                    // 每次识别前都根据当前框选计算最新图像坐标，避免旧缓存导致整图识别
+                    // 优先使用已保存的图像坐标，避免在识别界面重算导致的1x1误差
+                    let actualCropArea = savedImageCoordinates || null;
                     if (!actualCropArea) {
-                        console.log('使用备选方案：动态计算坐标');
-                        actualCropArea = calculateImageCoordinates(savedCropSelection || cropSelection);
+                        const cropHidden = cropStage && cropStage.classList && cropStage.classList.contains('hidden');
+                        if (cropHidden) {
+                            console.warn('裁剪容器不可见，跳过坐标重算，按整图或已保存坐标处理');
+                        } else {
+                            actualCropArea = calculateImageCoordinates(savedCropSelection || cropSelection);
+                            console.log('计算得到的裁剪区域(像素坐标):', actualCropArea);
+                        }
                     }
                     
-                    // 如果计算仍失败，使用整个图像
+                    // 如果仍无有效坐标，使用整图
                     if (!actualCropArea) {
-                        console.log('无法计算框选区域，使用整个图像');
                         const cropImage = document.getElementById('crop-image');
                         actualCropArea = {
                             x1: 0,
@@ -1163,15 +1146,33 @@
                             y2: cropImage ? cropImage.naturalHeight || 1000 : 1000,
                             active: true
                         };
+                        console.log('使用整图坐标区域:', actualCropArea);
                     }
                     
                     console.log('使用的图像坐标区域:', actualCropArea);
                     
-                    // 准备请求数据，包含计算后的框选区域信息
+                    // 坐标取整，避免边界误差
+                    ['x1','y1','x2','y2'].forEach(k => actualCropArea[k] = Math.round(actualCropArea[k] || 0));
+
+                    // 最小框选校验，避免发送过小或无效区域
+                    const areaW = Math.max(0, actualCropArea.x2 - actualCropArea.x1);
+                    const areaH = Math.max(0, actualCropArea.y2 - actualCropArea.y1);
+                    if (areaW < 20 || areaH < 20) {
+                        hideLoading();
+                        showToast('选择区域过小或无效，请重新框选', false);
+                        return;
+                    }
+
+                    // 在UI提示当前裁剪坐标，便于确认与预览一致
+                    showToast(`裁剪坐标: x1=${actualCropArea.x1}, y1=${actualCropArea.y1}, x2=${actualCropArea.x2}, y2=${actualCropArea.y2}`);
+                    
+                    // 直接在前端裁剪并发送裁剪后的图像，彻底避免坐标换算误差
+                    const croppedDataUrl = await getCroppedImageBase64(currentImage, actualCropArea);
                     const requestData = {
-                        image: currentImage.split(',')[1],
+                        image: croppedDataUrl.split(',')[1],
                         crop_area: actualCropArea
                     };
+                    console.log('发送到后端的裁剪区域:', requestData.crop_area);
                     
                     // 修改API端点为正确的后端地址
                     const response = await fetch('http://localhost:5000/api/ocr', {
@@ -1179,9 +1180,7 @@
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify(requestData),
-                        // 添加CORS支持
-                        credentials: 'include'
+                        body: JSON.stringify(requestData)
                     });
                     
                     const data = await response.json();
@@ -1209,22 +1208,32 @@
                 showLoading('表格识别中...');
                 
                 try {
-                    // 优先使用提前保存的图像坐标
-                    let actualCropArea = savedImageCoordinates;
+                    // 每次识别前都根据当前框选计算最新图像坐标，避免旧缓存导致整图识别
+                    let actualCropArea = calculateImageCoordinates(savedCropSelection || cropSelection);
+                    console.log('计算得到的裁剪区域(像素坐标):', actualCropArea);
                     
-                    // 如果没有保存的坐标，尝试计算（作为备选）
-                    if (!actualCropArea) {
-                        console.log('使用备选方案：动态计算坐标');
-                        actualCropArea = calculateImageCoordinates(savedCropSelection || cropSelection);
+                    // 坐标取整，避免边界误差
+                    ['x1','y1','x2','y2'].forEach(k => actualCropArea[k] = Math.round(actualCropArea[k] || 0));
+
+                    // 最小框选校验，避免发送过小或无效区域
+                    const areaW = Math.max(0, actualCropArea.x2 - actualCropArea.x1);
+                    const areaH = Math.max(0, actualCropArea.y2 - actualCropArea.y1);
+                    if (areaW < 20 || areaH < 20) {
+                        hideLoading();
+                        showToast('选择区域过小或无效，请重新框选', false);
+                        return;
                     }
+
+                    // 在UI提示当前裁剪坐标，便于确认与预览一致
+                    showToast(`裁剪坐标(表格): x1=${actualCropArea.x1}, y1=${actualCropArea.y1}, x2=${actualCropArea.x2}, y2=${actualCropArea.y2}`);
                     
-                    console.log('使用的图像坐标区域:', actualCropArea);
-                    
-                    // 准备请求数据，包含计算后的框选区域信息
+                    // 直接在前端裁剪并发送裁剪后的图像，彻底避免坐标换算误差
+                    const croppedDataUrl = await getCroppedImageBase64(currentImage, actualCropArea);
                     const requestData = {
-                        image: currentImage.split(',')[1],
+                        image: croppedDataUrl.split(',')[1],
                         crop_area: actualCropArea
                     };
+                    console.log('发送到后端的裁剪区域(表格识别):', requestData.crop_area);
                     
                     // 修改API端点为正确的后端地址
                     const response = await fetch('http://localhost:5000/api/recognize-table', {
@@ -1232,9 +1241,7 @@
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify(requestData),
-                        // 添加CORS支持
-                        credentials: 'include'
+                        body: JSON.stringify(requestData)
                     });
                     
                     const data = await response.json();
@@ -1458,6 +1465,30 @@
                 triggerFileUpload();
             }
 
+            // 回退自动应用的预览旋转（从第三步返回第二步时恢复原图）
+            function revertAutoAppliedRotationIfNeeded() {
+                try {
+                    if (autoAppliedFromNext && prevImageBeforeAutoApply) {
+                        currentImage = prevImageBeforeAutoApply;
+                        capturedImage.src = currentImage;
+                        currentRotation = prevRotationBeforeAutoApply;
+                        // 清除CSS预览旋转
+                        capturedImage.style.transform = 'none';
+                        // 重置旋转控件
+                        const rotateSlider = document.getElementById('rotate-slider');
+                        const rotateInput = document.getElementById('rotate-input');
+                        if (rotateSlider) rotateSlider.value = 0;
+                        if (rotateInput) rotateInput.value = 0;
+                        console.log('已恢复未旋转的原图');
+                    }
+                } catch (e) {
+                    console.warn('恢复原图失败:', e);
+                } finally {
+                    autoAppliedFromNext = false;
+                    prevImageBeforeAutoApply = null;
+                }
+            }
+
             // 绑定所有事件监听器
             safeBindEvent('rotate-left', 'click', () => quickRotate(-90));
             safeBindEvent('rotate-right', 'click', () => quickRotate(90));
@@ -1472,7 +1503,10 @@
             
             // 步骤切换按钮事件
             safeBindEvent('next-to-crop', 'click', enterCropStage);
-            safeBindEvent('back-to-rotate', 'click', enterRotateStage);
+            safeBindEvent('back-to-rotate', 'click', function() {
+                revertAutoAppliedRotationIfNeeded();
+                enterRotateStage();
+            });
             safeBindEvent('next-to-recognize', 'click', function() {
                 // 保存框选区域
                 savedCropSelection = {...cropSelection};
@@ -1536,7 +1570,7 @@
             if (resultText) {
                 resultText.addEventListener('input', updateTextStats);
             }
-        });
+            });
     </script>
 </body>
 </html>

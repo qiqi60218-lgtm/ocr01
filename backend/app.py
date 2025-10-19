@@ -474,25 +474,37 @@ class DocRecognizer:
             # 如果提供了裁剪区域，先裁剪图像
             if crop_area:
                 img = self.crop_image(img, crop_area)
-            
-            # 先尝试使用图像增强
-            enhanced_img = self.enhance_image(img)
-            
-            # 预处理图像
-            ocr_img = self.preprocess_for_ocr(enhanced_img)
-            
-            # 尝试使用不同的OCR配置
-            configs = [
-                '--psm 6',  # 假设是单一均匀块的文本
-                '--psm 3'   # 全自动页面分割
-            ]
-            
+
+            # 根据图像尺寸选择不同的OCR策略
+            h, w = img.shape[:2]
+            small_patch = min(h, w) < 60 or (h * w) < 4000
+            if small_patch:
+                logger.info(f"启用小区域OCR策略，尺寸: ({h}, {w})")
+                # 小区域：避免过度增强与二值化，直接轻度预处理
+                if img.ndim == 3:
+                    ocr_img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+                else:
+                    ocr_img = img.copy()
+                configs = [
+                    '--psm 7',  # 处理单行文本
+                    '--psm 8',  # 处理单词
+                    '--psm 6'   # 单一块文本
+                ]
+            else:
+                # 常规流程：增强 + 预处理
+                enhanced_img = self.enhance_image(img)
+                ocr_img = self.preprocess_for_ocr(enhanced_img)
+                configs = [
+                    '--psm 6',  # 假设是单一均匀块的文本
+                    '--psm 3'   # 全自动页面分割
+                ]
+
             # 尝试多种语言组合
             languages = ['chi_sim+eng', 'chi_sim']
-            
+
             # 存储所有可能的结果
             results = []
-            
+
             for lang in languages:
                 for config in configs:
                     try:
@@ -501,11 +513,10 @@ class DocRecognizer:
                             lang=lang,
                             config=config
                         )
-                        # 只添加非空结果
-                        if result.strip():
+                        if result:
                             results.append(result)
                     except Exception as e:
-                        logger.warning(f"OCR配置 {lang} {config} 失败: {str(e)}")
+                        logger.warning(f"OCR配置失败 lang={lang} config={config}: {e}")
             
             # 如果没有结果，尝试使用默认配置
             if not results:
