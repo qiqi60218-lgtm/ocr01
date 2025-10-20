@@ -170,7 +170,7 @@
                                 <button id="apply-rotation" class="ml-2 px-3 py-1 bg-primary text-white text-sm rounded">应用</button>
                             </div>
                         </div>
-                        <input id="rotate-slider" type="range" min="-359" max="359" value="0" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                        <input id="rotate-slider" type="range" min="-359" max="359" step="1" value="0" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
                     </div>
                     
                     <div class="flex gap-3">
@@ -195,7 +195,7 @@
                             <i class="fa fa-arrow-left mr-2"></i>返回旋转
                         </button>
                         <button id="next-to-recognize" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
-                            <i class="fa fa-check mr-2"></i>完成框选
+                            <i class="fa fa-check mr-2"></i>框选全部区域
                         </button>
                     </div>
                 </div>
@@ -204,17 +204,16 @@
                 <div id="recognize-stage" class="mt-6 hidden space-y-4">
                     <h4 class="text-center text-slate-600">选择识别类型</h4>
                     
-                    <!-- 自动识别与预览模式开关 -->
+                    <!-- 自动识别开关（已移除1:1像素预览） -->
                     <div class="flex items-center justify-center gap-4 text-sm text-slate-600">
                         <label class="flex items-center gap-2"><input id="auto-ocr-toggle" type="checkbox" class="w-4 h-4" checked>实时自动识别</label>
-                        <label class="flex items-center gap-2"><input id="native-preview-toggle" type="checkbox" class="w-4 h-4">1:1像素预览</label>
                     </div>
                     
                     <!-- 框选区域预览 -->
                     <div id="crop-preview-container" class="bg-slate-50 rounded-lg border border-slate-200 p-3">
                         <h5 class="text-sm font-medium text-slate-600 mb-2">框选区域预览</h5>
                         <div id="crop-preview-frame" class="bg-white rounded-lg overflow-auto border border-slate-200 max-h-[60vh] flex items-center justify-center">
-                            <img id="crop-preview" class="max-w-full h-auto" alt="框选区域预览">
+                            <img id="crop-preview" class="block" alt="框选区域预览">
                         </div>
                     </div>
                     
@@ -441,17 +440,11 @@
             const cropImage = document.getElementById('crop-image');
             const cropContainer = document.getElementById('crop-container');
             const autoOcrToggle = document.getElementById('auto-ocr-toggle');
-            const nativePreviewToggle = document.getElementById('native-preview-toggle');
             if (autoOcrToggle) {
                 autoOcrToggle.checked = true;
                 autoOcrToggle.addEventListener('change', () => {
                     autoOCREnabled = autoOcrToggle.checked;
                     if (autoOCREnabled) scheduleAutoOCR();
-                    try { createCropPreview(); } catch {}
-                });
-            }
-            if (nativePreviewToggle) {
-                nativePreviewToggle.addEventListener('change', () => {
                     try { createCropPreview(); } catch {}
                 });
             }
@@ -605,7 +598,7 @@
                 try {
                     const cropPreviewContainer = document.getElementById('crop-preview-container');
                     const previewImg = document.getElementById('crop-preview');
-                    const nativeToggle = document.getElementById('native-preview-toggle');
+
                     if (!previewImg || !cropPreviewContainer || !currentImage) return;
 
                     // 使用已计算的原始图像坐标；若不存在则尝试根据保存的DOM坐标计算
@@ -630,28 +623,22 @@
                         const sh = y2 - y1;
 
                         const canvas = document.createElement('canvas');
-                        canvas.width = sw;
-                        canvas.height = sh;
                         const ctx = canvas.getContext('2d');
                         // 关闭平滑避免半像素插值导致边缘发虚
                         ctx.imageSmoothingEnabled = false;
+                        // 自适应预览：画布为选区尺寸
+                        canvas.width = sw;
+                        canvas.height = sh;
                         ctx.drawImage(img, x1, y1, sw, sh, 0, 0, sw, sh);
 
-                        // 设置预览显示模式：1:1像素 or 自适应
-                        const native = nativeToggle && nativeToggle.checked;
                         previewImg.src = canvas.toDataURL('image/png');
                         previewImg.alt = '框选区域预览';
-                        // 1:1像素预览：按裁剪原始尺寸呈现，滚动查看完整内容
-                        if (native) {
-                            previewImg.style.width = sw + 'px';
-                            previewImg.style.height = sh + 'px';
-                            previewImg.style.imageRendering = 'pixelated';
-                        } else {
-                            // 自适应：宽度撑满容器，高度自适应；保持完整显示
-                            previewImg.style.width = '100%';
-                            previewImg.style.height = 'auto';
-                            previewImg.style.imageRendering = 'auto';
-                        }
+                        // 自适应：宽度撑满容器，高度自适应；保持完整显示
+                        previewImg.style.width = '100%';
+                        previewImg.style.height = 'auto';
+                        previewImg.style.maxWidth = '100%';
+                        previewImg.style.maxHeight = '60vh';
+                        previewImg.style.imageRendering = 'auto';
                         cropPreviewContainer.style.display = 'block';
                     };
                     img.onerror = (err) => {
@@ -735,9 +722,10 @@
                         // 创建选择框
                         if (!selectionBox) {
                             selectionBox = document.createElement('div');
-                            selectionBox.className = 'absolute border-2 border-dashed border-primary bg-primary/20';
-                            // 避免视觉边界比坐标更大：宽高包含边框
-                            selectionBox.style.boxSizing = 'border-box';
+                            // 使用outline代替border，避免宽高因边框被缩小导致坐标偏差
+                            selectionBox.className = 'absolute outline outline-2 outline-dashed outline-primary bg-primary/20';
+                            // 使用content-box，width/height不包含outline，确保视觉与坐标一致
+                            selectionBox.style.boxSizing = 'content-box';
                             cropContainer.appendChild(selectionBox);
                             // 记录选框DOM引用，确保之后坐标计算与视觉一致
                             cropSelectionBoxEl = selectionBox;
@@ -793,13 +781,53 @@
                 function updateSelectionBox() {
                     if (!selectionBox) return;
                     
-                    const x = Math.min(cropSelection.x1, cropSelection.x2);
-                    const y = Math.min(cropSelection.y1, cropSelection.y2);
-                    const width = Math.abs(cropSelection.x2 - cropSelection.x1);
-                    const height = Math.abs(cropSelection.y2 - cropSelection.y1);
+                    // 计算图像内容在容器内的显示区域（object-contain），避免用<img>元素尺寸导致比例不一致
+                    const contRect = cropContainer.getBoundingClientRect();
+                    const contW = contRect.width || 1;
+                    const contH = contRect.height || 1;
+                    const natW = cropImage.naturalWidth || 1;
+                    const natH = cropImage.naturalHeight || 1;
+                    const scale = Math.min(contW / natW, contH / natH);
+                    const contentW = Math.max(1, natW * scale);
+                    const contentH = Math.max(1, natH * scale);
+                    const offsetX = (contW - contentW) / 2;
+                    const offsetY = (contH - contentH) / 2;
                     
-                    selectionBox.style.left = `${x}px`;
-                    selectionBox.style.top = `${y}px`;
+                    // 将选区限制在图像内容显示区域内，避免超出导致识别区域被夹小
+                    let sx1 = Math.min(cropSelection.x1, cropSelection.x2);
+                    let sy1 = Math.min(cropSelection.y1, cropSelection.y2);
+                    let sx2 = Math.max(cropSelection.x1, cropSelection.x2);
+                    let sy2 = Math.max(cropSelection.y1, cropSelection.y2);
+                    sx1 = Math.max(offsetX, Math.min(offsetX + contentW, sx1));
+                    sy1 = Math.max(offsetY, Math.min(offsetY + contentH, sy1));
+                    sx2 = Math.max(offsetX, Math.min(offsetX + contentW, sx2));
+                    sy2 = Math.max(offsetY, Math.min(offsetY + contentH, sy2));
+                    
+                    // 像素对齐：映射到原图像素并反投影回CSS像素，避免高DPI/缩放下的半像素误差
+                    const relX1 = Math.max(0, sx1 - offsetX);
+                    const relY1 = Math.max(0, sy1 - offsetY);
+                    const relX2 = Math.max(0, sx2 - offsetX);
+                    const relY2 = Math.max(0, sy2 - offsetY);
+                    const ox1 = Math.floor(relX1 / scale);
+                    const oy1 = Math.floor(relY1 / scale);
+                    const ox2 = Math.ceil(relX2 / scale);
+                    const oy2 = Math.ceil(relY2 / scale);
+                    const px1 = offsetX + (ox1 * scale);
+                    const py1 = offsetY + (oy1 * scale);
+                    const px2 = offsetX + (ox2 * scale);
+                    const py2 = offsetY + (oy2 * scale);
+                    
+                    // 将像素对齐后的值写回，确保坐标计算与视觉一致
+                    cropSelection.x1 = px1;
+                    cropSelection.y1 = py1;
+                    cropSelection.x2 = px2;
+                    cropSelection.y2 = py2;
+                    
+                    const width = Math.max(0, px2 - px1);
+                    const height = Math.max(0, py2 - py1);
+                    
+                    selectionBox.style.left = `${px1}px`;
+                    selectionBox.style.top = `${py1}px`;
                     selectionBox.style.width = `${width}px`;
                     selectionBox.style.height = `${height}px`;
                 }
@@ -857,7 +885,10 @@
             // 实时预览旋转（前端CSS实现）
             function previewRotate(angle) {
                 if (!capturedImage) return;
-                capturedImage.style.transform = `rotate(${angle}deg)`;
+                // 使用 requestAnimationFrame 提升连续滑动时的渲染流畅度
+                window.requestAnimationFrame(() => {
+                    capturedImage.style.transform = `rotate(${angle}deg)`;
+                });
             }
             
             // 应用旋转（后端处理实际旋转）
@@ -1033,16 +1064,11 @@ function calculateImageCoordinates(cropArea) {
                         const by = boxRect.top - contRect.top;
                         const bw = boxRect.width;
                         const bh = boxRect.height;
-                        // 扣除边框厚度，确保裁剪使用选框内部可视区域
-                        const cs = window.getComputedStyle(cropSelectionBoxEl);
-                        const bl = parseFloat(cs.borderLeftWidth) || 0;
-                        const bt = parseFloat(cs.borderTopWidth) || 0;
-                        const br = parseFloat(cs.borderRightWidth) || 0;
-                        const bb = parseFloat(cs.borderBottomWidth) || 0;
-                        x1 = bx + bl;
-                        y1 = by + bt;
-                        x2 = bx + bw - br;
-                        y2 = by + bh - bb;
+                        // 已改用outline，不再扣除边框厚度，直接使用渲染盒尺寸
+                        x1 = bx;
+                        y1 = by;
+                        x2 = bx + bw;
+                        y2 = by + bh;
                     }
                     
                     // 确保坐标有效
@@ -1051,71 +1077,38 @@ function calculateImageCoordinates(cropArea) {
                         return null;
                     }
                     
-                    // 获取图像的实际显示尺寸和位置
-                    const imgRect = cropImage.getBoundingClientRect();
+                    // 计算object-contain下的图像内容显示区域与统一缩放比例
                     const containerRect = cropContainer.getBoundingClientRect();
-                    
-                    // 初始使用真实DOM尺寸
-                    let displayWidth = imgRect.width;
-                    let displayHeight = imgRect.height;
-                    let imgX = imgRect.left - containerRect.left;
-                    let imgY = imgRect.top - containerRect.top;
-                    
-                    // 原始尺寸
+                    const contW = containerRect.width || 1;
+                    const contH = containerRect.height || 1;
                     const imgWidth = cropImage.naturalWidth || 1;
                     const imgHeight = cropImage.naturalHeight || 1;
+                    const scale = Math.min(contW / imgWidth, contH / imgHeight);
+                    const displayWidth = Math.max(1, Math.round(imgWidth * scale));
+                    const displayHeight = Math.max(1, Math.round(imgHeight * scale));
+                    const imgX = Math.round((contW - displayWidth) / 2);
+                    const imgY = Math.round((contH - displayHeight) / 2);
                     
-                    // 若DOM尺寸异常过小（例如未完成布局或隐藏导致为0/1），按object-contain规则回退计算显示尺寸与偏移
-                    if (!displayWidth || displayWidth < 5 || !displayHeight || displayHeight < 5) {
-                        const containerW = containerRect.width || 1;
-                        const containerH = containerRect.height || 1;
-                        const ar = imgWidth / imgHeight;
-                        let fallbackW, fallbackH;
-                        if (containerW / containerH > ar) {
-                            // 容器更宽，充满高度
-                            fallbackH = containerH;
-                            fallbackW = containerH * ar;
-                        } else {
-                            // 容器更高，充满宽度
-                            fallbackW = containerW;
-                            fallbackH = containerW / ar;
-                        }
-                        displayWidth = Math.max(1, Math.round(fallbackW));
-                        displayHeight = Math.max(1, Math.round(fallbackH));
-                        // object-contain通常居中显示，计算左上偏移
-                        imgX = Math.round((containerW - displayWidth) / 2);
-                        imgY = Math.round((containerH - displayHeight) / 2);
-                        console.warn('触发显示尺寸回退: ', {displayWidth, displayHeight, imgX, imgY, containerW, containerH});
-                    }
+                    console.log('图像内容在容器内位置:', imgX, imgY);
+                    console.log('图像显示尺寸(内容):', displayWidth, 'x', displayHeight);
+                    console.log('图像原始尺寸:', imgWidth, 'x', imgHeight);
+                    console.log('统一缩放比例:', scale);
+                    console.log('框选DOM坐标:', x1, y1, x2, y2);
                     
-                    // 考虑旋转角度
-                    const rotation = Math.abs(currentRotation) % 360;
+                    // 计算相对于图像内容的坐标（考虑居中偏移）
+                    const relativeX1 = Math.max(0, Math.min(displayWidth, x1 - imgX));
+                    const relativeY1 = Math.max(0, Math.min(displayHeight, y1 - imgY));
+                    const relativeX2 = Math.max(0, Math.min(displayWidth, x2 - imgX));
+                    const relativeY2 = Math.max(0, Math.min(displayHeight, y2 - imgY));
                     
-                    // 计算基本缩放比例
-                    const scaleX = imgWidth / displayWidth;
-                    const scaleY = imgHeight / displayHeight;
-                
-                console.log('图像在容器内位置:', imgX, imgY);
-                console.log('图像显示尺寸:', displayWidth, 'x', displayHeight);
-                console.log('图像原始尺寸:', imgWidth, 'x', imgHeight);
-                console.log('缩放比例:', scaleX, 'x', scaleY);
-                console.log('当前旋转角度:', currentRotation);
-                console.log('框选DOM坐标:', x1, y1, x2, y2);
-                
-                // 计算相对于图像的坐标（考虑图像在容器中的位置）
-                    const relativeX1 = Math.max(0, x1 - imgX);
-                    const relativeY1 = Math.max(0, y1 - imgY);
-                    const relativeX2 = Math.min(displayWidth, x2 - imgX);
-                    const relativeY2 = Math.min(displayHeight, y2 - imgY);
+                    console.log('相对于图像内容的坐标:', relativeX1, relativeY1, relativeX2, relativeY2);
                     
-                    console.log('相对于图像的坐标:', relativeX1, relativeY1, relativeX2, relativeY2);
-                    
-                    // 转换到原始图像坐标
+                    // 转换到原始图像像素坐标（统一比例）
                     // 使用起点向下取整、终点向上取整，避免边界被截断
-                    let originalX1 = Math.floor(relativeX1 * scaleX);
-                    let originalY1 = Math.floor(relativeY1 * scaleY);
-                    let originalX2 = Math.ceil(relativeX2 * scaleX);
-                    let originalY2 = Math.ceil(relativeY2 * scaleY);
+                    let originalX1 = Math.floor(relativeX1 / scale);
+                    let originalY1 = Math.floor(relativeY1 / scale);
+                    let originalX2 = Math.ceil(relativeX2 / scale);
+                    let originalY2 = Math.ceil(relativeY2 / scale);
                 
                 // 边界检查
                 let safeX1 = Math.max(0, originalX1);
@@ -1157,10 +1150,10 @@ function calculateImageCoordinates(cropArea) {
                         cropDebugBoxEl.style.zIndex = '50';
                         cropContainer.appendChild(cropDebugBoxEl);
                     }
-                    const dbgX1 = imgX + (convertedArea.x1 / scaleX);
-                    const dbgY1 = imgY + (convertedArea.y1 / scaleY);
-                    const dbgX2 = imgX + (convertedArea.x2 / scaleX);
-                    const dbgY2 = imgY + (convertedArea.y2 / scaleY);
+                    const dbgX1 = imgX + (convertedArea.x1 * scale);
+                    const dbgY1 = imgY + (convertedArea.y1 * scale);
+                    const dbgX2 = imgX + (convertedArea.x2 * scale);
+                    const dbgY2 = imgY + (convertedArea.y2 * scale);
                     cropDebugBoxEl.style.left = `${dbgX1}px`;
                     cropDebugBoxEl.style.top = `${dbgY1}px`;
                     cropDebugBoxEl.style.width = `${Math.max(0, dbgX2 - dbgX1)}px`;
@@ -1601,23 +1594,34 @@ function calculateImageCoordinates(cropArea) {
                 enterRotateStage();
             });
             safeBindEvent('next-to-recognize', 'click', function() {
-                // 若未框选则默认整图；有框选则保存并计算坐标
-                const w = Math.abs(cropSelection.x2 - cropSelection.x1);
-                const h = Math.abs(cropSelection.y2 - cropSelection.y1);
-                const hasSelection = w > 0 && h > 0;
-                if (hasSelection) {
-                    savedCropSelection = { ...cropSelection };
-                    try {
-                        savedImageCoordinates = calculateImageCoordinates(savedCropSelection);
-                        console.log('进入识别前使用已框选坐标:', savedImageCoordinates);
-                    } catch (e) {
-                        console.warn('进入识别前计算坐标失败，后续按整图处理');
-                        savedImageCoordinates = null;
-                    }
-                } else {
+                // 点击即框选整张图像内容矩形（object-contain），忽略已有选区
+                try {
+                    const contRect = cropContainer.getBoundingClientRect();
+                    const contW = Math.round(contRect.width);
+                    const contH = Math.round(contRect.height);
+                    const natW = cropImage.naturalWidth;
+                    const natH = cropImage.naturalHeight;
+                    // 统一缩放比例与内容尺寸
+                    const scale = Math.min(contW / natW, contH / natH);
+                    const contentW = Math.round(natW * scale);
+                    const contentH = Math.round(natH * scale);
+                    const offsetX = Math.round((contW - contentW) / 2);
+                    const offsetY = Math.round((contH - contentH) / 2);
+                    // 在容器坐标系中设置“整图内容矩形”选区
+                    savedCropSelection = {
+                        x1: offsetX,
+                        y1: offsetY,
+                        x2: offsetX + contentW,
+                        y2: offsetY + contentH,
+                        active: true
+                    };
+                    // 计算对应的原始图像坐标
+                    savedImageCoordinates = calculateImageCoordinates(savedCropSelection);
+                    console.log('点击框选全部区域，使用整图内容坐标:', savedImageCoordinates);
+                } catch (e) {
+                    console.warn('框选全部区域失败，回退为整图处理:', e);
                     savedCropSelection = null;
                     savedImageCoordinates = null;
-                    showToast('未框选，默认使用整图');
                 }
                 // 合并步骤：不切换界面，直接刷新预览并执行识别
                 recognizeStage.classList.remove('hidden');
@@ -1632,12 +1636,22 @@ function calculateImageCoordinates(cropArea) {
             
             if (rotateSlider && rotateInput) {
                 // 控件值表示“目标累计角度”，预览应抵消当前累计角度，使视觉与目标一致
-                rotateSlider.addEventListener('input', function() {
-                    const value = parseInt(this.value) || 0;
+                const onSliderInput = () => {
+                    const value = parseInt(rotateSlider.value) || 0;
                     rotateInput.value = value;
-                    // 预览为：目标累计角度 - 当前累计角度（抵消已应用的物理旋转）
                     previewRotate(value - currentRotation);
-                });
+                };
+                rotateSlider.addEventListener('input', onSliderInput, { passive: true });
+                // 兼容部分浏览器：拖动过程中也连续更新
+                rotateSlider.addEventListener('pointerdown', () => {
+                    const moveHandler = () => onSliderInput();
+                    const upHandler = () => {
+                        window.removeEventListener('pointermove', moveHandler);
+                        window.removeEventListener('pointerup', upHandler);
+                    };
+                    window.addEventListener('pointermove', moveHandler, { passive: true });
+                    window.addEventListener('pointerup', upHandler, { passive: true });
+                }, { passive: true });
                 
                 rotateInput.addEventListener('input', function() {
                     // 验证输入范围
@@ -1647,9 +1661,8 @@ function calculateImageCoordinates(cropArea) {
                     if (value > 359) value = 359;
                     this.value = value;
                     rotateSlider.value = value;
-                    // 预览为：目标累计角度 - 当前累计角度
                     previewRotate(value - currentRotation);
-                });
+                }, { passive: true });
                 
                 if (applyRotationBtn) {
                     applyRotationBtn.addEventListener('click', async function() {
