@@ -219,6 +219,9 @@
                         <button id="start-ocr" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
                             <i class="fa fa-file-text-o mr-2"></i>文本识别
                         </button>
+                        <button id="start-ocr-doubao" class="flex-1 bg-primary/80 hover:bg-primary text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all" title="豆包云端识别">
+                            <i class="fa fa-cloud mr-2"></i>豆包识别
+                        </button>
                         <button id="recognize-table" class="flex-1 bg-secondary hover:bg-secondary/90 text-white py-2.5 rounded-lg shadow-md hover:shadow-lg transition-all">
                             <i class="fa fa-table mr-2"></i>表格识别
                         </button>
@@ -237,8 +240,14 @@
                         <button id="copy-text" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
                             <i class="fa fa-copy"></i>
                         </button>
-                        <button id="fix-text" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
+                        <button id="fix-text" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors" title="规则纠错">
                             <i class="fa fa-magic"></i>
+                        </button>
+                        <button id="fix-text-llm" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors" title="LLM纠错">
+                            <i class="fa fa-magic"></i><span class="ml-1 text-xs">LLM</span>
+                        </button>
+                        <button id="llm-extract" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors" title="结构化抽取">
+                            <i class="fa fa-object-group"></i>
                         </button>
                         <button id="download-text" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
                             <i class="fa fa-file-text-o"></i>
@@ -1227,7 +1236,8 @@ function calculateImageCoordinates(cropArea) {
                     const croppedDataUrl = await getCroppedImageBase64(currentImage, actualCropArea);
                     const requestData = {
                         image: croppedDataUrl.split(',')[1],
-                        crop_area: actualCropArea
+                        crop_area: actualCropArea,
+                        engine: window.__useCloudOCR ? 'doubao' : undefined
                     };
                     console.log('发送到后端的裁剪区域:', requestData.crop_area);
                     
@@ -1407,28 +1417,22 @@ function calculateImageCoordinates(cropArea) {
                 showToast('文本已复制到剪贴板');
             }
 
-            // 文本纠错
+            // 文本纠错（规则）
             async function fixText() {
                 const text = resultText.value.trim();
                 if (!text) return;
-                
                 showLoading('文本纠错中...');
-                
                 try {
                     const response = await fetch('/api/fix-text', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            text: text
-                        })
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text })
                     });
-                    
                     const data = await response.json();
                     if (data.success) {
                         resultText.value = data.text;
                         updateTextStats();
+                        showLoading();
                         hideLoading();
                         showToast('文本纠错完成');
                     } else {
@@ -1438,6 +1442,73 @@ function calculateImageCoordinates(cropArea) {
                     console.error('纠错错误:', error);
                     hideLoading();
                     showToast('文本纠错失败', false);
+                }
+            }
+
+            // 文本纠错（LLM）
+            async function fixTextLLM() {
+                const text = resultText.value.trim();
+                if (!text) return;
+                showLoading('LLM纠错中...');
+                try {
+                    const response = await fetch('/api/fix-text', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text, use_llm: true })
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        resultText.value = data.text;
+                        updateTextStats();
+                        hideLoading();
+                        showToast('LLM纠错完成');
+                    } else {
+                        throw new Error(data.error || 'LLM纠错失败');
+                    }
+                } catch (error) {
+                    console.error('LLM纠错错误:', error);
+                    hideLoading();
+                    showToast('LLM纠错失败', false);
+                }
+            }
+
+            // LLM结构化抽取
+            async function llmExtract() {
+                const text = resultText.value.trim();
+                if (!text) return;
+                showLoading('结构化抽取中...');
+                try {
+                    const response = await fetch('/api/llm/extract', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text })
+                    });
+                    const data = await response.json();
+                    hideLoading();
+                    if (data.success) {
+                        const jsonStr = JSON.stringify(data.data, null, 2);
+                        showToast('抽取成功');
+                        // 在文本下方创建/更新结果块
+                        let panel = document.getElementById('llm-extract-panel');
+                        if (!panel) {
+                            panel = document.createElement('div');
+                            panel.id = 'llm-extract-panel';
+                            panel.className = 'mt-4 p-3 border border-slate-200 rounded-lg bg-slate-50';
+                            const pre = document.createElement('pre');
+                            pre.id = 'llm-extract-result';
+                            pre.className = 'text-xs text-slate-700 whitespace-pre-wrap';
+                            panel.appendChild(pre);
+                            document.getElementById('result-container').appendChild(panel);
+                        }
+                        const pre = document.getElementById('llm-extract-result');
+                        pre.textContent = jsonStr;
+                    } else {
+                        throw new Error(data.error || '抽取失败');
+                    }
+                } catch (error) {
+                    console.error('结构化抽取错误:', error);
+                    hideLoading();
+                    showToast('结构化抽取失败', false);
                 }
             }
 
@@ -1569,10 +1640,13 @@ function calculateImageCoordinates(cropArea) {
             safeBindEvent('rotate-right', 'click', () => quickRotate(90));
             // 已移除增强功能绑定
             safeBindEvent('retake', 'click', triggerReupload);
-            safeBindEvent('start-ocr', 'click', () => performOCR(false));
+            safeBindEvent('start-ocr', 'click', () => { window.__useCloudOCR = false; performOCR(false); });
+            safeBindEvent('start-ocr-doubao', 'click', () => { window.__useCloudOCR = true; performOCR(false); });
             safeBindEvent('recognize-table', 'click', recognizeTable);
             safeBindEvent('copy-text', 'click', copyText);
             safeBindEvent('fix-text', 'click', fixText);
+            safeBindEvent('fix-text-llm', 'click', fixTextLLM);
+            safeBindEvent('llm-extract', 'click', llmExtract);
             safeBindEvent('download-text', 'click', downloadText);
             safeBindEvent('upload-file', 'click', triggerFileUpload);
             

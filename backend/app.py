@@ -1,3 +1,9 @@
+"""
+DocVision AI 后端服务
+
+- Flask 提供静态页与 REST API：旋转、OCR、表格识别、文本纠错、LLM抽取、保存Word。
+- 支持本地 Tesseract 与远程（豆包/网关）OCR，配置从 `.env` 读取。
+"""
 from flask import Flask, request, jsonify, send_from_directory, send_file
 import cv2
 import numpy as np
@@ -13,11 +19,15 @@ from flask_cors import CORS
 # 用于生成Word文档
 from docx import Document
 from docx.shared import Inches
+from dotenv import load_dotenv
 
 # 配置日志
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('DocVision')
+
+# 加载环境变量
+load_dotenv()
 
 # 创建Flask应用
 app = Flask(__name__, static_folder='../frontend', static_url_path='/')
@@ -602,6 +612,24 @@ class DocRecognizer:
 # 全局识别器实例
 recognizer = DocRecognizer()
 
+# LLM客户端（如豆包）初始化
+try:
+    from llm_client import LLMClient
+    llm_client = LLMClient.from_env()
+    logger.info('LLM客户端初始化完成')
+except Exception as e:
+    llm_client = None
+    logger.warning(f'LLM客户端初始化失败或未配置: {str(e)}')
+
+# 远程OCR客户端
+try:
+    from remote_ocr_client import RemoteOCRClient
+    remote_ocr = RemoteOCRClient.from_env()
+    logger.info('远程OCR客户端初始化完成')
+except Exception as e:
+    remote_ocr = None
+    logger.warning(f'远程OCR未配置或初始化失败: {str(e)}')
+
 # 健康检查端点
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -675,7 +703,15 @@ def ocr():
         logger.info(f"裁剪区域参数: {crop_area}")
         
         # 执行OCR
-        text = recognizer.ocr_text(img, crop_area=crop_area)
+        # 执行OCR
+        engine = (data.get('engine') or '').lower()
+        if engine in ('doubao', 'remote'):
+            if remote_ocr is None:
+                return jsonify({'error': '远程OCR未配置'}), 400
+            # 注意：前端发送的是裁剪后的PNG base64（不含头部），我们直接透传
+            text = remote_ocr.ocr(data['image'], crop_area=crop_area)
+        else:
+            text = recognizer.ocr_text(img, crop_area=crop_area)
         
         if not text:
             # 即使没有识别到文本，也返回成功但文本为空
@@ -742,30 +778,52 @@ def recognize_table():
 # 文本纠错API
 @app.route('/api/fix-text', methods=['POST'])
 def fix_text():
-    """文本纠错API"""
+    """文本纠错API（支持use_llm开关）"""
     try:
         data = request.json
         if not data or 'text' not in data:
             return jsonify({'error': '缺少文本参数'}), 400
-        
         text = data['text']
         if not isinstance(text, str):
             return jsonify({'error': '文本必须是字符串格式'}), 400
-        
-        logger.info("收到文本纠错请求")
-        
-        fixed_text = recognizer.fix_text(text)
-        
+
+        use_llm = bool(data.get('use_llm')) and llm_client is not None
+        logger.info(f"收到文本纠错请求，use_llm={use_llm}")
+
+        if use_llm:
+            extra = data.get('instructions')
+            fixed_text = llm_client.fix_text(text, extra_instructions=extra)
+        else:
+            fixed_text = recognizer.fix_text(text)
+
         return jsonify({
             'success': True,
             'text': fixed_text,
-            'message': '文本纠错成功',
+            'message': '文本纠错成功' + ("（LLM）" if use_llm else "（规则）"),
             'original_length': len(text),
             'fixed_length': len(fixed_text)
         })
     except Exception as e:
         logger.error(f"文本纠错失败: {str(e)}")
         return jsonify({'error': f'文本纠错失败: {str(e)}'}), 500
+
+# LLM结构化抽取API
+@app.route('/api/llm/extract', methods=['POST'])
+def llm_extract():
+    """使用LLM对OCR文本进行结构化抽取，返回JSON。"""
+    if llm_client is None:
+        return jsonify({'error': 'LLM未配置'}), 400
+    try:
+        data = request.json or {}
+        text = data.get('text', '')
+        schema = data.get('schema')
+        instruction = data.get('instruction')
+        if not text:
+            return jsonify({'error': '缺少文本参数'}), 400
+        result = llm_client.extract_structured(text, schema_hint=schema, instruction=instruction)
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        return jsonify({'error': f'抽取失败: {str(e)}'}), 500
 
 # 保存为Word文档
 @app.route('/api/save-word', methods=['POST'])

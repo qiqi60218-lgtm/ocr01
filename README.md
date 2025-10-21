@@ -1,158 +1,83 @@
 # DocVision AI - 智能文档识别系统
 
-## 项目介绍
-DocVision AI 是一个基于前后端分离架构的智能文档识别系统，支持相机实时扫描、图像上传、OCR文本识别和智能文本纠错等功能。
+DocVision AI 是一个基于前后端分离的文档识别应用，支持本地 Tesseract OCR 与云端（豆包/兼容）OCR，提供文本纠错与结构化抽取能力。后端使用 Flask 提供 API，前端为纯 HTML/CSS/JavaScript 页面。
 
-## 架构说明
-
-### 前后端分离架构
-- **前端**：纯HTML/CSS/JavaScript实现，使用Tailwind CSS构建响应式界面
-- **后端**：基于Flask框架的RESTful API，处理OCR识别、图像处理等核心功能
-
-### 项目结构
+## 项目结构
 ```
 ocr01/
-├── backend/                  # 后端服务
-│   ├── app.py                # Flask应用主文件
-│   ├── requirements.txt      # Python依赖
-│   └── start_server.bat      # 启动脚本
-└── frontend/                 # 前端页面
-    └── index.html            # 主页面
+├── backend/
+│   ├── app.py               # Flask 后端主程序（同时提供前端静态页面）
+│   ├── requirements.txt     # 后端依赖
+│   ├── .env.example         # 配置示例（LLM 与远程OCR）
+│   ├── llm_client.py        # LLM 客户端（文本纠错、结构化抽取）
+│   ├── remote_ocr_client.py # 远程OCR客户端（豆包/网关）
+│   └── start_server.bat     # 一键启动后端脚本
+├── frontend/
+│   └── index.html           # 前端页面（含“开始识别/豆包识别”按钮）
+├── run_server.bat           # 一键启动后端与前端
+└── README.md
 ```
 
-## 核心功能
+## 快速开始
+- 安装依赖与启动后端（推荐）
+  - 进入 `backend` 目录，执行：
+    - `pip install -r requirements.txt`
+    - `python app.py`
+  - 浏览器访问 `http://localhost:5000/`
+- 可选前端本地服务器
+  - 进入 `frontend` 目录，执行：`python -m http.server 8000`
+  - 访问 `http://localhost:8000/`（确保后端已启动）
+- Windows 用户安装 Tesseract OCR
+  - 到 `https://github.com/UB-Mannheim/tesseract/wiki` 下载并安装
+  - 安装后建议加入系统环境变量；后端会自动探测常见安装路径
 
-1. **相机实时扫描**
-   - 支持前后摄像头切换
-   - 实时预览和拍摄文档
-   - 适配移动设备和桌面设备
+## 配置说明
+- 复制配置示例
+  - 将 `backend/.env.example` 复制为 `backend/.env`
+- 云端 OCR（豆包/兼容）
+  - 填写：`REMOTE_OCR_API_BASE`、`REMOTE_OCR_ENDPOINT`（如非默认）、`REMOTE_OCR_API_KEY`、`REMOTE_OCR_MODEL`、`REMOTE_OCR_TIMEOUT`
+  - 启动后端后，在前端点击“豆包识别”按钮即可走云端OCR
+- LLM（可选）
+  - 如需文本纠错/抽取，填入：`LLM_API_BASE`、`LLM_API_KEY`、`LLM_MODEL`（以及必要的 `LLM_ENDPOINT`、`LLM_TIMEOUT` 等）
 
-2. **图像处理**
-   - 图像旋转（支持90度、180度等任意角度）
-   - 图像上传（支持各种常见图片格式）
-   - 智能图像预处理
+## 前端使用
+- “开始识别”：使用本地 Tesseract OCR
+- “豆包识别”：使用云端 OCR（需配置 `.env`）
+- 支持框选局部区域识别；未框选时默认识别整图
 
-3. **OCR识别**
-   - 支持中英文混合识别
-   - 高精度文本提取
-   - 优化的识别算法
+## API 接口
+- `GET /health`
+  - 返回服务状态：`{ status, service, version }`
+- `POST /api/rotate`
+  - 请求：`{ image: <base64>, angle: <number>, enhance?: <bool> }`
+  - 返回：`{ success, image: 'data:image/...;base64,...', message }`
+- `POST /api/ocr`
+  - 请求：
+    - `image`: Base64 图像字符串（支持 dataURL 或纯 base64）
+    - `crop_area?`: `{ x, y, width, height }`
+    - `engine?`: `'doubao' | 'remote'`（云端识别）或留空（本地识别）
+    - `auto_fix?`: 布尔，是否使用本地规则做简单纠错
+  - 返回：`{ success, text, message, char_count }`
+- `POST /api/recognize-table`
+  - 请求：`{ image: <base64>, crop_area?: {…} }`
+  - 返回：`{ success, table_text, table_html?, has_table, message }`
+- `POST /api/fix-text`
+  - 请求：`{ text: <string>, use_llm?: <bool>, instructions?: <string> }`
+  - 返回：`{ success, text, message, original_length, fixed_length }`
+- `POST /api/llm/extract`
+  - 请求：`{ text: <string>, schema?: <any>, instruction?: <string> }`
+  - 返回：`{ success, data }`（结构化 JSON）
+- `POST /api/save-word`
+  - 请求：`{ text: <string>, has_table?: <bool> }`
+  - 返回：Word 文档（下载）
 
-4. **文本处理**
-   - 智能文本纠错
-   - 文本复制和下载
-   - 文本编辑功能
-
-## 技术栈
-
-### 前端
-- HTML5 + CSS3 + JavaScript
-- Tailwind CSS v3（UI框架）
-- Font Awesome（图标库）
-- HTML5 Canvas API（图像处理）
-- MediaDevices API（相机访问）
-
-### 后端
-- Python 3.8+
-- Flask 3.0（Web框架）
-- OpenCV（图像处理）
-- Tesseract OCR（文本识别）
-- NumPy（数值计算）
-- PIL/Pillow（图像处理）
-
-## 环境要求
-
-### 后端要求
-- Python 3.8 或更高版本
-- Tesseract OCR 4.1 或更高版本
-  - Windows用户：从 https://github.com/UB-Mannheim/tesseract/wiki 下载安装
-  - 安装后需确保添加到系统环境变量，或在app.py中修改路径
-
-## 使用方法
-
-### 1. 启动后端服务
-
-#### Windows系统：
-1. 进入 `backend` 目录
-2. 双击运行 `start_server.bat` 脚本
-3. 脚本会自动安装依赖并启动服务
-4. 服务将在 http://0.0.0.0:5000 启动
-
-#### 手动启动（可选）：
-```bash
-cd backend
-pip install -r requirements.txt
-python app.py
-```
-
-### 2. 访问前端页面
-
-启动后端服务后，可以通过以下方式访问前端页面：
-
-1. **通过后端服务访问**（推荐）：
-   - 打开浏览器，访问 http://localhost:5000
-   - 后端会自动提供前端静态文件
-
-2. **直接访问本地文件**：
-   - 打开浏览器，直接打开 `frontend/index.html` 文件
-   - 确保后端服务仍在运行
-
-## 摄像头权限说明
-
-首次使用时，浏览器会请求摄像头访问权限，请确保：
-
-1. 允许浏览器访问摄像头
-2. 使用HTTPS协议（如果在生产环境）
-3. 在移动设备上启用相机权限
-
-## 常见问题解答
-
-1. **摄像头无法启动**
-   - 检查浏览器是否已授予相机权限
-   - 确保没有其他应用正在使用摄像头
-   - 尝试切换前后摄像头
-
-2. **OCR识别不准确**
-   - 确保图像光线充足
-   - 尽量使文档与摄像头平行
-   - 使用文本纠错功能优化结果
-
-3. **后端服务启动失败**
-   - 检查Python是否正确安装
-   - 确认Tesseract OCR路径配置正确
-   - 检查端口5000是否被占用
-
-## API接口说明
-
-### 1. 旋转图像
-- **URL**: `/api/rotate`
-- **方法**: `POST`
-- **参数**: 
-  - `image`: base64编码的图像数据
-  - `angle`: 旋转角度
-- **返回**: 旋转后的图像数据
-
-### 2. OCR识别
-- **URL**: `/api/ocr`
-- **方法**: `POST`
-- **参数**: 
-  - `image`: base64编码的图像数据
-  - `region`: 可选，要识别的区域坐标
-- **返回**: 识别出的文本内容
-
-### 3. 文本纠错
-- **URL**: `/api/fix-text`
-- **方法**: `POST`
-- **参数**: 
-  - `text`: 待纠错的文本
-- **返回**: 纠错后的文本
-
-## 注意事项
-
-1. 本系统需要Tesseract OCR引擎支持，请确保正确安装
-2. 相机功能需要浏览器支持并授予权限
-3. 前后摄像头切换功能在移动设备上效果最佳
-4. 大图像可能需要较长的处理时间
+## 常见问题
+- 远程 OCR 未配置
+  - 点击“豆包识别”时报错 `远程OCR未配置`，请在 `backend/.env` 填写远程OCR参数并重启后端
+- 摄像头/权限问题
+  - 首次使用需授权浏览器摄像头；如在生产环境建议使用 HTTPS
+- 端口被占用
+  - 确认 `5000`（后端）或 `8000`（前端）未被其他程序占用
 
 ## 许可证
-
 MIT License
