@@ -152,9 +152,7 @@
                         <button id="rotate-right" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3 rounded-full shadow-sm hover:shadow transition-all">
                             <i class="fa fa-rotate-right text-xl"></i>
                         </button>
-                        <button id="enhance-image" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3 rounded-full shadow-sm hover:shadow transition-all">
-                            <i class="fa fa-magic text-xl"></i>
-                        </button>
+                        <!-- 已移除增强图像清晰度按钮 -->
                         <button id="retake" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3 rounded-full shadow-sm hover:shadow transition-all">
                             <i class="fa fa-refresh text-xl"></i>
                         </button>
@@ -463,6 +461,11 @@
             let currentRotation = 0;
             let currentStep = 0; // 0: 初始状态, 1: 上传完成, 2: 旋转完成, 3: 框选完成
             let cropSelection = { x1: 0, y1: 0, x2: 0, y2: 0, active: false };
+            // 防止拖拽后误触发点击上传导致重复弹窗
+            let suppressUploadPrompt = false;
+            // 防抖与重入控制：阻止连续打开文件选择器
+            let uploadDialogOpen = false;
+            let lastDropAt = 0;
             // 自动应用预览旋转的回退状态
             let prevImageBeforeAutoApply = null;
             let prevRotationBeforeAutoApply = 0;
@@ -856,6 +859,7 @@
                     uploadPlaceholder.classList.add('hidden');
                     capturedImage.src = currentImage;
                     capturedImage.classList.remove('hidden');
+                    suppressUploadPrompt = false;
                     
                     // 隐藏主操作按钮
                     const mainActions = document.getElementById('main-actions');
@@ -873,12 +877,27 @@
 
             // 触发文件选择器
             function triggerFileUpload() {
+                // 在拖拽上传流程中抑制可能的合成点击，避免重复打开
+                if (typeof suppressUploadPrompt !== 'undefined' && suppressUploadPrompt) {
+                    console.debug('已抑制拖拽后的点击上传以避免重复弹窗');
+                    return;
+                }
+                // 防抖与重入：避免在短时间内或已打开情况下重复打开
+                const now = Date.now();
+                if (uploadDialogOpen || (now - lastDropAt) < 600) {
+                    console.debug('文件选择器已打开或刚刚完成拖拽，已阻止重复弹窗');
+                    return;
+                }
                 const input = document.createElement('input');
                 input.type = 'file';
                 input.accept = 'image/*';
                 input.onchange = function(e) {
+                    uploadDialogOpen = false;
                     handleFileUpload(e.target.files[0]);
                 };
+                uploadDialogOpen = true;
+                // 兜底：若浏览器未触发change或blur，避免卡住
+                setTimeout(() => { uploadDialogOpen = false; }, 2000);
                 input.click();
             }
 
@@ -965,53 +984,7 @@
                 console.log('快捷旋转完成，角度控件已更新为累计角度:', currentRotation);
             }
             
-            // 图像增强函数
-            async function enhanceImage() {
-                if (!currentImage) return;
-                
-                showLoading('正在增强图像清晰度...');
-                
-                try {
-                    // 这里我们复用旋转API，因为它已经包含了图像处理和返回的逻辑
-                    // 在实际应用中，最好创建一个专门的增强API
-                    const response = await fetch('http://localhost:5000/api/rotate', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            image: currentImage.split(',')[1],
-                            angle: 0,  // 不旋转，只做增强
-                            enhance: true  // 添加增强标志
-                        })
-                    });
-                    
-                    const data = await response.json();
-                    if (data.success) {
-                        currentImage = data.image;
-                        capturedImage.src = currentImage;
-                        // 同步更新裁剪阶段图像，确保第三步看到的是增强后的图
-                        const cropImgEl = document.getElementById('crop-image');
-                        if (cropImgEl) {
-                            cropImgEl.src = currentImage;
-                            console.log('裁剪阶段图像已同步更新(增强后):', cropImgEl.src.substring(0, 60) + '...');
-                        }
-                        
-                        // 增强后清空旧的框选和坐标，避免尺寸/像素变化导致失效
-                        savedCropSelection = null;
-                        savedImageCoordinates = null;
-                        
-                        hideLoading();
-                        showToast('图像清晰度提升成功，请重新框选区域');
-                    } else {
-                        throw new Error(data.error || '增强失败');
-                    }
-                } catch (error) {
-                    console.error('图像增强错误:', error);
-                    hideLoading();
-                    showToast('图像增强失败', false);
-                }
-            }
+            // 已彻底移除图像增强功能
 
             // 保存框选区域（DOM坐标）
             let savedCropSelection = null;
@@ -1507,16 +1480,31 @@ function calculateImageCoordinates(cropArea) {
                 
                 imageContainer.addEventListener('drop', function(e) {
                     e.preventDefault();
+                    e.stopPropagation();
                     imageContainer.classList.remove('border-primary');
+                    // 隐藏占位符并暂时禁止点击触发文件选择，避免拖拽后误触发
+                    suppressUploadPrompt = true;
+                    lastDropAt = Date.now();
+                    if (uploadPlaceholder) uploadPlaceholder.classList.add('hidden');
                     
                     if (e.dataTransfer.files.length > 0) {
                         handleFileUpload(e.dataTransfer.files[0]);
                     }
+                    // 给合成点击留出时间窗口，稍后再恢复点击行为
+                    setTimeout(() => { suppressUploadPrompt = false; }, 500);
                 });
             }
 
             // 初始化拖拽上传
             setupDragAndDrop();
+
+            // 全局捕获点击，在抑制期间屏蔽一切点击事件传播与默认行为，防止重复弹窗
+            document.addEventListener('click', function(e) {
+                if (suppressUploadPrompt) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }, true);
 
             // 安全地绑定事件监听器
             function safeBindEvent(elementId, event, callback) {
@@ -1533,6 +1521,7 @@ function calculateImageCoordinates(cropArea) {
                 currentRotation = 0;
                 currentStep = 0;
                 cropSelection = { x1: 0, y1: 0, x2: 0, y2: 0, active: false };
+                suppressUploadPrompt = false;
                 
                 // 重置UI
                 capturedImage.classList.add('hidden');
@@ -1578,7 +1567,7 @@ function calculateImageCoordinates(cropArea) {
             // 绑定所有事件监听器
             safeBindEvent('rotate-left', 'click', () => quickRotate(-90));
             safeBindEvent('rotate-right', 'click', () => quickRotate(90));
-            safeBindEvent('enhance-image', 'click', enhanceImage);
+            // 已移除增强功能绑定
             safeBindEvent('retake', 'click', triggerReupload);
             safeBindEvent('start-ocr', 'click', () => performOCR(false));
             safeBindEvent('recognize-table', 'click', recognizeTable);
@@ -1692,13 +1681,20 @@ function calculateImageCoordinates(cropArea) {
             
             // 点击上传区域触发文件选择
             if (uploadPlaceholder) {
-                uploadPlaceholder.addEventListener('click', triggerFileUpload);
+                uploadPlaceholder.addEventListener('click', function(e) {
+                    if (suppressUploadPrompt) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                    triggerFileUpload();
+                });
             }
             
             if (imageContainer) {
                 imageContainer.addEventListener('click', function(e) {
                     // 只有在显示上传占位符时才触发上传
-                    if (uploadPlaceholder && !uploadPlaceholder.classList.contains('hidden')) {
+                    if (uploadPlaceholder && !uploadPlaceholder.classList.contains('hidden') && !suppressUploadPrompt) {
                         triggerFileUpload();
                     }
                 });
