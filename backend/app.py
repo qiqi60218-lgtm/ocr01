@@ -8,6 +8,7 @@ from flask import Flask, request, jsonify, send_from_directory, send_file
 import cv2
 import numpy as np
 import pytesseract
+from pytesseract import Output
 from PIL import Image, ImageEnhance
 import re
 import os
@@ -163,6 +164,87 @@ class DocRecognizer:
                 maxLineGap=10
             )
             
+            # 优先尝试基于网格线的结构化表格提取
+            try:
+                def _cluster_positions(vals, tol=5):
+                    vals = sorted(vals)
+                    clusters = []
+                    for v in vals:
+                        if not clusters or abs(v - clusters[-1][-1]) > tol:
+                            clusters.append([v])
+                        else:
+                            clusters[-1].append(v)
+                    # 使用平均值代表每个聚类
+                    return [int(sum(c) / len(c)) for c in clusters]
+                # 提取水平线的y坐标与垂直线的x坐标
+                h_pos_candidates = []
+                if horizontal_lines is not None:
+                    for line in horizontal_lines:
+                        x1, y1, x2, y2 = line[0]
+                        h_pos_candidates.extend([y1, y2])
+                v_pos_candidates = []
+                if vertical_lines is not None:
+                    for line in vertical_lines:
+                        x1, y1, x2, y2 = line[0]
+                        v_pos_candidates.extend([x1, x2])
+                h_positions = _cluster_positions(h_pos_candidates, tol=6) if h_pos_candidates else []
+                v_positions = _cluster_positions(v_pos_candidates, tol=6) if v_pos_candidates else []
+                h_positions = sorted(list(set(h_positions)))
+                v_positions = sorted(list(set(v_positions)))
+                # 筛掉过于密集的噪声线（间距过小）
+                h_positions = [p for i,p in enumerate(h_positions) if i==0 or (p - h_positions[i-1]) > 8]
+                v_positions = [p for i,p in enumerate(v_positions) if i==0 or (p - v_positions[i-1]) > 8]
+                if len(h_positions) >= 2 and len(v_positions) >= 2:
+                    # 以线位置定义网格，逐格OCR
+                    rows_text = []
+                    # 确定表格区域边界
+                    min_x, max_x = v_positions[0], v_positions[-1]
+                    min_y, max_y = h_positions[0], h_positions[-1]
+                    # 限制到图像范围
+                    min_x = max(0, min_x); max_x = min(image.shape[1]-1, max_x)
+                    min_y = max(0, min_y); max_y = min(image.shape[0]-1, max_y)
+                    # 遍历相邻线形成的网格单元
+                    for r in range(len(h_positions)-1):
+                        y_top = h_positions[r]
+                        y_bottom = h_positions[r+1]
+                        row_cells = []
+                        for c in range(len(v_positions)-1):
+                            x_left = v_positions[c]
+                            x_right = v_positions[c+1]
+                            # 裁剪单元格区域，适当内缩，避免线条干扰
+                            pad_x = max(1, (x_right - x_left) // 20)
+                            pad_y = max(1, (y_bottom - y_top) // 20)
+                            x1c = max(min_x, x_left + pad_x)
+                            x2c = min(max_x, x_right - pad_x)
+                            y1c = max(min_y, y_top + pad_y)
+                            y2c = min(max_y, y_bottom - pad_y)
+                            if x2c > x1c and y2c > y1c:
+                                cell = image[y1c:y2c, x1c:x2c]
+                                # 灰度与轻度二值化
+                                cell_gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY) if cell.ndim == 3 else cell
+                                cell_thr = cv2.adaptiveThreshold(cell_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 11, 2)
+                                # 单元格识别：单行/短文本
+                                try:
+                                    cell_text = pytesseract.image_to_string(cell_thr, lang='chi_sim+eng', config='--oem 3 --psm 7')
+                                except Exception:
+                                    cell_text = ''
+                                row_cells.append(cell_text.strip())
+                            else:
+                                row_cells.append('')
+                        rows_text.append(row_cells)
+                    # 生成HTML与文本
+                    table_text_structured = '\n'.join(['\t'.join(row) for row in rows_text]).strip()
+                    table_html = self._generate_table_html([[None,None,None,None,cell] for row in rows_text for cell in row])
+                    # 上面生成HTML需要每行结构，改为按行迭代
+                    table_html = '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse: collapse; width: 100%;">' + ''.join(['<tr>' + ''.join([f'<td>{cell}</td>' for cell in row]) + '</tr>' for row in rows_text]) + '</table>'
+                    return {
+                        'table_text': table_text_structured,
+                        'table_html': table_html,
+                        'has_table': True
+                    }
+            except Exception as e:
+                logger.warning(f"网格表格提取失败，回退：{e}")
+            
             # 创建一个表格线图像
             lines_image = np.zeros_like(gray)
             
@@ -280,12 +362,30 @@ class DocRecognizer:
                 except Exception as e:
                     logger.warning(f"备用表格识别失败: {e}")
                 
-                # 如果无法识别表格，返回空结果
-                return {
-                    'table_text': "未识别到表格结构",
-                    'table_html': None,
-                    'has_table': False
-                }
+                # 如果无法识别表格，回退为纯OCR文本（保证总能有结果）
+                try:
+                    fallback_img = image
+                    if crop_area and isinstance(crop_area, dict):
+                        try:
+                            fallback_img = self.crop_image(image, crop_area)
+                        except Exception:
+                            fallback_img = image
+                    # 统一轻度预处理，提高可读性
+                    proc = self.preprocess_for_ocr(fallback_img)
+                    fallback_text = pytesseract.image_to_string(proc, lang='chi_sim+eng', config='--oem 3 --psm 6').strip()
+                    logger.info(f"表格结构缺失，已回退为纯文本，长度: {len(fallback_text)}")
+                    return {
+                        'table_text': fallback_text if fallback_text else "",
+                        'table_html': None,
+                        'has_table': False
+                    }
+                except Exception as fe:
+                    logger.warning(f"纯文本回退失败: {fe}")
+                    return {
+                        'table_text': "",
+                        'table_html': None,
+                        'has_table': False
+                    }
         except Exception as e:
             logger.error(f"表格识别错误: {str(e)}")
             raise
@@ -396,29 +496,76 @@ class DocRecognizer:
         return rotated
     
     def preprocess_for_ocr(self, img):
-        """增强版图像预处理，提高OCR准确率"""
+        """自适应图像预处理：放大、去噪、对比度增强、自动纠偏、阈值与形态学，提升OCR准确率"""
         try:
-            # 转换为灰度图
+            # 1) 转为灰度
             if img.ndim == 3:
                 gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
             else:
                 gray = img.copy()
-            
-            # 自适应阈值处理，适应不同光照
-            binary = cv2.adaptiveThreshold(
-                gray, 255, 
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                cv2.THRESH_BINARY, 
-                11, 2
-            )
-            
-            # 应用小的膨胀操作增强文字连接
-            kernel = np.ones((1, 1), np.uint8)
-            processed = cv2.morphologyEx(binary, cv2.MORPH_DILATE, kernel)
-            
-            # 高斯模糊减少噪点
+
+            h, w = gray.shape[:2]
+            # 2) 小图自动放大（最多放大到较长边1600像素）
+            max_side = max(h, w)
+            if max_side < 800:
+                scale = min(1600 / max_side, 2.0)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                gray = cv2.resize(gray, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+                h, w = new_h, new_w
+
+            # 3) 轻度去噪 + 局部对比度增强
+            denoised = cv2.bilateralFilter(gray, d=5, sigmaColor=50, sigmaSpace=50)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(denoised)
+
+            # 4) 基于最小外接矩形估计倾斜角并纠偏（避免过度旋转）
+            try:
+                thr = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+                inv = cv2.bitwise_not(thr)
+                coords = np.column_stack(np.where(inv > 0))
+                if coords.shape[0] > 500:  # 足够的前景像素
+                    rect = cv2.minAreaRect(coords.astype(np.float32))
+                    angle = rect[-1]
+                    if angle < -45:
+                        angle = -(90 + angle)
+                    else:
+                        angle = -angle
+                    if abs(angle) >= 0.5 and abs(angle) <= 8.0:
+                        M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+                        enhanced = cv2.warpAffine(enhanced, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+            except Exception:
+                pass
+
+            # 5) 根据直方图选择阈值方法：Otsu优先，极端情况回退自适应
+            try:
+                _, otsu_bin = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                black_ratio = (otsu_bin == 0).sum() / (otsu_bin.size)
+                if 0.05 < black_ratio < 0.95:
+                    binary = otsu_bin
+                else:
+                    binary = cv2.adaptiveThreshold(
+                        enhanced, 255,
+                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                        cv2.THRESH_BINARY,
+                        11, 2
+                    )
+            except Exception:
+                binary = cv2.adaptiveThreshold(
+                    enhanced, 255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY,
+                    11, 2
+                )
+
+            # 6) 形态学处理：先开后闭，去小噪点并连接细字符
+            kernel_small = np.ones((1, 1), np.uint8)
+            kernel_mid = np.ones((2, 2), np.uint8)
+            opened = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_small)
+            processed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel_mid)
+
+            # 7) 轻度模糊，抑制锯齿
             processed = cv2.GaussianBlur(processed, (1, 1), 0)
-            
             return processed
         except Exception as e:
             logger.error(f"图像预处理失败: {str(e)}")
@@ -426,7 +573,7 @@ class DocRecognizer:
             if img.ndim == 3:
                 return cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
             return img
-    
+
     def enhance_image(self, img):
         """增强版图像增强，大幅提高对比度和清晰度"""
         try:
@@ -475,80 +622,208 @@ class DocRecognizer:
             logger.error(f"图像增强失败: {str(e)}")
             return img  # 失败时返回原图
     
-    def ocr_text(self, img, crop_area=None):
-        """增强版OCR识别，使用多种配置提高准确率"""
+    def ocr_text_merged(self, img, crop_area=None, top_k: int = 3):
+        """全新OCR实现：单一入口，内部自包含多路预处理与多配置尝试，
+        返回最佳结果与若干候选文本。
+        返回: { 'text': str, 'alternatives': [str, ...] }
+        """
         if img is None:
             raise ValueError("输入图像为空")
-        
+
         try:
-            # 如果提供了裁剪区域，先裁剪图像
+            # 1) 可选裁剪（前端通常已裁剪，但仍支持后端裁剪）
             if crop_area:
                 img = self.crop_image(img, crop_area)
 
-            # 根据图像尺寸选择不同的OCR策略
-            h, w = img.shape[:2]
-            small_patch = min(h, w) < 60 or (h * w) < 4000
-            if small_patch:
-                logger.info(f"启用小区域OCR策略，尺寸: ({h}, {w})")
-                # 小区域：避免过度增强与二值化，直接轻度预处理
-                if img.ndim == 3:
-                    ocr_img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-                else:
-                    ocr_img = img.copy()
-                configs = [
-                    '--psm 7',  # 处理单行文本
-                    '--psm 8',  # 处理单词
-                    '--psm 6'   # 单一块文本
-                ]
+            # 2) 轻量方向检测与校正（尽量容错）
+            try:
+                h0, w0 = img.shape[:2]
+                if max(h0, w0) > 600:
+                    gray0 = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+                    osd = pytesseract.image_to_osd(Image.fromarray(gray0))
+                    m = re.search(r"Rotate:\s*(\d+)", osd)
+                    if m:
+                        deg = int(m.group(1)) % 360
+                        if deg in (90, 180, 270):
+                            img = self.rotate_image(img, deg, enhance=False)
+                            logger.info(f"自动方向校正: 旋转 {deg} 度")
+            except Exception as e:
+                logger.warning(f"方向检测失败或跳过: {e}")
+
+            # 3) 构造预处理分支（纯灰度、自适应阈值、OTSU、反锐化 + 归一化）
+            if img.ndim == 3:
+                base_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             else:
-                # 常规流程：增强 + 预处理
-                enhanced_img = self.enhance_image(img)
-                ocr_img = self.preprocess_for_ocr(enhanced_img)
-                configs = [
-                    '--psm 6',  # 假设是单一均匀块的文本
-                    '--psm 3'   # 全自动页面分割
-                ]
+                base_gray = img.copy()
 
-            # 尝试多种语言组合
-            languages = ['chi_sim+eng', 'chi_sim']
+            def unsharp(gray: np.ndarray) -> np.ndarray:
+                blur = cv2.GaussianBlur(gray, (0, 0), 1.0)
+                sharp = cv2.addWeighted(gray, 1.5, blur, -0.5, 0)
+                return sharp
 
-            # 存储所有可能的结果
-            results = []
+            def norm_contrast(gray: np.ndarray) -> np.ndarray:
+                return cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
 
-            for lang in languages:
-                for config in configs:
-                    try:
-                        result = pytesseract.image_to_string(
-                            Image.fromarray(ocr_img),
-                            lang=lang,
-                            config=config
-                        )
-                        if result:
-                            results.append(result)
-                    except Exception as e:
-                        logger.warning(f"OCR配置失败 lang={lang} config={config}: {e}")
-            
-            # 如果没有结果，尝试使用默认配置
-            if not results:
+            # 自适应阈值与OTSU
+            try:
+                adap = cv2.adaptiveThreshold(base_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                             cv2.THRESH_BINARY, 31, 10)
+            except Exception:
+                adap = base_gray
+            try:
+                _, otsu = cv2.threshold(base_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            except Exception:
+                otsu = base_gray
+
+            variants = []
+            variants.append(("gray", base_gray))
+            variants.append(("adap", adap))
+            variants.append(("otsu", otsu))
+            variants.append(("sharp_norm", norm_contrast(unsharp(base_gray))))
+
+            # 小图放大，边缘加白边
+            tuned_variants = []
+            for name, im in variants:
+                h, w = im.shape[:2]
+                scale = 1.0
+                if max(h, w) < 900:
+                    scale = min(2.5, 900.0 / max(h, w))
+                if scale > 1.05:
+                    im = cv2.resize(im, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
                 try:
-                    results.append(pytesseract.image_to_string(
-                        Image.fromarray(ocr_img)
-                    ))
+                    im = cv2.copyMakeBorder(im, 8, 12, 8, 8, cv2.BORDER_CONSTANT, value=255)
+                except Exception:
+                    pass
+                tuned_variants.append((name, im))
+
+            # 4) 语言初判（快速小样本）：估计中文占比，决定语言优先顺序与空格策略
+            def count_chars(s: str):
+                if not s:
+                    return 0, 0
+                cjk = len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", s))
+                latin = len(re.findall(r"[A-Za-z]", s))
+                return cjk, latin
+
+            try:
+                probe = cv2.resize(base_gray, (min(600, base_gray.shape[1]), int(base_gray.shape[0] * min(600, base_gray.shape[1]) / max(1, base_gray.shape[1]))))
+            except Exception:
+                probe = base_gray
+            probe_img = Image.fromarray(probe)
+
+            probe_txt_zh = ""
+            probe_txt_en = ""
+            try:
+                probe_txt_zh = pytesseract.image_to_string(probe_img, lang='chi_sim', config='--oem 3 --psm 7 -c user_defined_dpi=300')
+            except Exception:
+                pass
+            try:
+                probe_txt_en = pytesseract.image_to_string(probe_img, lang='eng', config='--oem 3 --psm 7 -c user_defined_dpi=300 -c preserve_interword_spaces=1')
+            except Exception:
+                pass
+            cjk_cnt, latin_cnt = count_chars((probe_txt_zh or '') + (probe_txt_en or ''))
+            total_alpha = max(1, cjk_cnt + latin_cnt)
+            cjk_ratio = cjk_cnt / total_alpha
+
+            if cjk_ratio >= 0.3:
+                lang_order = ['chi_sim+eng', 'chi_sim', 'eng']
+            else:
+                lang_order = ['eng', 'chi_sim+eng', 'chi_sim']
+
+            # 5) 多配置尝试（全新评分体系）：综合置信度、行数、长度与语言偏好
+            psms = [6, 3, 4, 7, 11]
+            results_meta = []
+
+            for vname, im in tuned_variants:
+                pil_img = Image.fromarray(im)
+                for lg in lang_order:
+                    preserve_spaces = 0 if ('chi_sim' in lg and cjk_ratio >= 0.2) else 1
+                    for psm in psms:
+                        cfg = f"--oem 3 --psm {psm} -c user_defined_dpi=300 -c preserve_interword_spaces={preserve_spaces}"
+                        try:
+                            txt = pytesseract.image_to_string(pil_img, lang=lg, config=cfg) or ""
+                            data = pytesseract.image_to_data(pil_img, lang=lg, config=cfg, output_type=Output.DICT)
+                            conf_vals = []
+                            for c in data.get('conf', []) or []:
+                                try:
+                                    ci = int(c)
+                                    if ci >= 0:
+                                        conf_vals.append(ci)
+                                except Exception:
+                                    continue
+                            mean_conf = float(sum(conf_vals)) / len(conf_vals) if conf_vals else 0.0
+                            word_count = len([t for t in (data.get('text', []) or []) if t and t.strip()])
+                            line_count = max(data.get('line_num', [0] or [0])) if isinstance(data.get('line_num'), list) else 0
+                            cjk_c, latin_c = count_chars(txt)
+
+                            # 评分：置信度 + 语言偏好 + 行数/长度适度加分
+                            lang_boost = 0.0
+                            if cjk_ratio >= 0.3:
+                                lang_boost += 6.0 if 'chi_sim' in lg else (-4.0 if lg == 'eng' else 0.0)
+                            else:
+                                lang_boost += 3.0 if lg == 'eng' else 0.5 if 'chi_sim+eng' in lg else 0.0
+
+                            length_boost = min(5.0, len(txt) / 200.0)
+                            line_boost = min(3.0, line_count / 10.0)
+
+                            score = round(mean_conf + lang_boost + length_boost + line_boost, 3)
+                            results_meta.append({
+                                'text': txt,
+                                'variant': vname,
+                                'lang': lg,
+                                'psm': psm,
+                                'score': score,
+                                'mean_conf': mean_conf,
+                                'word_count': word_count,
+                                'cjk': cjk_c,
+                                'latin': latin_c,
+                            })
+                        except Exception as e:
+                            logger.warning(f"OCR失败 variant={vname} lang={lg} psm={psm}: {e}")
+
+            if not results_meta:
+                # 彻底兜底
+                try:
+                    txt = pytesseract.image_to_string(Image.fromarray(base_gray)) or ""
+                    results_meta.append({'text': txt, 'variant': 'fallback', 'lang': 'auto', 'psm': -1, 'score': 0.0, 'mean_conf': 0.0, 'word_count': len(txt.split()), 'cjk': 0, 'latin': 0})
                 except Exception as e:
-                    logger.error(f"所有OCR配置都失败了: {str(e)}")
+                    logger.error(f"全部OCR尝试失败: {e}")
                     raise
-            
-            # 选择结果最长的（通常更准确）
-            best_result = max(results, key=len, default="")
-            
-            # 清理结果
-            cleaned_result = re.sub(r'\n+', '\n', best_result.strip())
-            logger.info(f"OCR识别完成，识别到 {len(cleaned_result)} 个字符")
-            return cleaned_result
+
+            # 6) 文本清理和去重
+            def clean_text_new(s: str) -> str:
+                if not s:
+                    return ''
+                s = s.replace('\r\n', '\n').replace('\r', '\n')
+                s = re.sub(r'[\t\x0b\x0c]', ' ', s)
+                s = re.sub(r'-\n', '', s)  # 合并断字
+                s = re.sub(r'\s+\n', '\n', s)
+                s = re.sub(r'\n{3,}', '\n\n', s)
+                s = re.sub(r'\s{2,}', ' ', s)
+                return s.strip()
+
+            for r in results_meta:
+                r['text'] = clean_text_new(r['text'])
+
+            # 唯一化（严格去重）
+            uniq = []
+            for r in sorted(results_meta, key=lambda x: x['score'], reverse=True):
+                t = r['text']
+                if not t:
+                    continue
+                if all(t != u['text'] for u in uniq):
+                    uniq.append(r)
+                if len(uniq) >= top_k + 1:
+                    break
+
+            best = uniq[0]['text'] if uniq else ''
+            alts = [u['text'] for u in uniq[1:]]
+
+            logger.info(f"新OCR完成：主结果len={len(best)} 备选数={len(alts)} cjk_ratio={cjk_ratio:.2f}")
+            return {'text': best, 'alternatives': alts}
         except Exception as e:
             logger.error(f"OCR识别失败: {str(e)}")
             raise
-    
+
     def fix_text(self, text):
         """增强版文本纠错"""
         if not text:
@@ -686,7 +961,7 @@ def rotate():
 # OCR识别API
 @app.route('/api/ocr', methods=['POST'])
 def ocr():
-    """OCR识别API"""
+    """OCR识别API（支持variant=baseline/enhanced参数用于对比）"""
     try:
         data = request.json
         if not data or 'image' not in data:
@@ -703,32 +978,36 @@ def ocr():
         logger.info(f"裁剪区域参数: {crop_area}")
         
         # 执行OCR
-        # 执行OCR
         engine = (data.get('engine') or '').lower()
+        variant = (data.get('variant') or '').lower()
         if engine in ('doubao', 'remote'):
             if remote_ocr is None:
                 return jsonify({'error': '远程OCR未配置'}), 400
             # 注意：前端发送的是裁剪后的PNG base64（不含头部），我们直接透传
             text = remote_ocr.ocr(data['image'], crop_area=crop_area)
         else:
-            text = recognizer.ocr_text(img, crop_area=crop_area)
+            # 统一本地识别：忽略 variant，使用合并后的单一管线，并返回备选
+            merged = recognizer.ocr_text_merged(img, crop_area=crop_area)
+            text = merged.get('text', '')
+            alternatives = merged.get('alternatives', [])
         
         if not text:
-            # 即使没有识别到文本，也返回成功但文本为空
             logger.warning("OCR识别未返回任何文本")
             return jsonify({
                 'success': True,
                 'text': '',
+                'alternatives': alternatives if 'alternatives' in locals() else [],
                 'message': '未识别到文本'
             })
         
-        # 可选的文本纠错
+        # 可选的文本纠错（对主结果应用）
         if data.get('auto_fix', False):
             text = recognizer.fix_text(text)
         
         return jsonify({
             'success': True,
             'text': text,
+            'alternatives': alternatives if 'alternatives' in locals() else [],
             'message': 'OCR识别成功',
             'char_count': len(text)
         })

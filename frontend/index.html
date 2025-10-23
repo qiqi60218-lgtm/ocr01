@@ -200,7 +200,7 @@
 
                 <!-- 识别界面 -->
                 <div id="recognize-stage" class="mt-6 hidden space-y-4">
-                    <h4 class="text-center text-slate-600">选择识别类型</h4>
+                    <h4 class="text-center text-slate-600">选择识别方式</h4>
                     
                     <!-- 自动识别开关（已移除1:1像素预览） -->
                     <div class="flex items-center justify-center gap-4 text-sm text-slate-600">
@@ -216,14 +216,11 @@
                     </div>
                     
                     <div class="flex gap-3">
-                        <button id="start-ocr" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
-                            <i class="fa fa-file-text-o mr-2"></i>文本识别
+                        <button id="start-ocr" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all" title="本地识别">
+                            <i class="fa fa-file-text-o mr-2"></i>开始识别
                         </button>
                         <button id="start-ocr-doubao" class="flex-1 bg-primary/80 hover:bg-primary text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all" title="豆包云端识别">
-                            <i class="fa fa-cloud mr-2"></i>豆包识别
-                        </button>
-                        <button id="recognize-table" class="flex-1 bg-secondary hover:bg-secondary/90 text-white py-2.5 rounded-lg shadow-md hover:shadow-lg transition-all">
-                            <i class="fa fa-table mr-2"></i>表格识别
+                            <i class="fa fa-cloud mr-2"></i>云端识别
                         </button>
                     </div>
                 </div>
@@ -255,6 +252,7 @@
                         <button id="save-as-word" class="p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors">
                             <i class="fa fa-file-word-o"></i>
                         </button>
+
                     </div>
                 </div>
                 
@@ -266,9 +264,43 @@
                     </div>
                     
                     <div id="result-container" class="hidden">
-                        <textarea id="result-text" class="w-full min-h-[300px] p-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all resize-none"></textarea>
+                        <div class="space-y-6">
+                            <div>
+                                <div class="mb-2 text-slate-600 font-medium flex items-center justify-between">
+                                    <span>原始识别</span>
+                                    <div class="flex gap-2">
+                                        <button id="download-text-original" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出TXT"><i class="fa fa-file-text-o"></i></button>
+                                        <button id="save-as-word-original" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出Word"><i class="fa fa-file-word-o"></i></button>
+                                    </div>
+                                </div>
+                                <textarea id="result-text" class="w-full min-h-[420px] p-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all resize-none"></textarea>
+                                <div class="mt-2 text-xs text-slate-500"><span id="text-stats">0 字符</span></div>
+                            </div>
+                            <div>
+                                <div class="mb-2 text-slate-600 font-medium flex items-center justify-between">
+                                    <span>优化识别</span>
+                                    <div class="flex gap-2">
+                                        <button id="download-text-enhanced" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出TXT"><i class="fa fa-file-text-o"></i></button>
+                                        <button id="save-as-word-enhanced" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出Word"><i class="fa fa-file-word-o"></i></button>
+                                    </div>
+                                </div>
+                                <textarea id="result-text-enhanced" class="w-full min-h-[420px] p-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all resize-none"></textarea>
+                                <div class="mt-2 text-xs text-slate-500"><span id="text-stats-enhanced">0 字符</span></div>
+                            </div>
+                            <div>
+                                <div class="mb-2 text-slate-600 font-medium flex items-center justify-between">
+                                    <span>云端识别</span>
+                                    <div class="flex gap-2">
+                                        <button id="download-text-cloud" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出TXT"><i class="fa fa-file-text-o"></i></button>
+                                        <button id="save-as-word-cloud" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出Word"><i class="fa fa-file-word-o"></i></button>
+                                    </div>
+                                </div>
+                                <textarea id="result-text-cloud" class="w-full min-h-[420px] p-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all resize-none"></textarea>
+                                <div class="mt-2 text-xs text-slate-500"><span id="text-stats-cloud">0 字符</span></div>
+                            </div>
+                        </div>
                         <div class="mt-4 text-sm text-slate-500 flex justify-between items-center">
-                            <span id="text-stats">0 字符</span>
+                            <span>对比后可复制或保存到文档</span>
                             <div class="flex gap-2">
                                 <button class="text-slate-600 hover:text-primary transition-colors px-2 py-1 rounded hover:bg-slate-100">
                                     <i class="fa fa-check mr-1"></i>保存
@@ -431,7 +463,11 @@
             const resultPlaceholder = document.getElementById('result-placeholder');
             const resultContainer = document.getElementById('result-container');
             const resultText = document.getElementById('result-text');
+            const resultTextEnhanced = document.getElementById('result-text-enhanced');
+            const resultTextCloud = document.getElementById('result-text-cloud');
             const textStats = document.getElementById('text-stats');
+            const textStatsEnhanced = document.getElementById('text-stats-enhanced');
+            const textStatsCloud = document.getElementById('text-stats-cloud');
             const loadingModal = document.getElementById('loading-modal');
             const loadingText = document.getElementById('loading-text');
             const toast = document.getElementById('toast');
@@ -506,10 +542,20 @@
                 loadingModal.classList.add('hidden');
             }
 
-            // 更新文本统计
+            // 更新文本统计（原始/优化/云端）
             function updateTextStats() {
-                const text = resultText.value;
-                textStats.textContent = `${text.length} 字符`;
+                const t1 = resultText ? (resultText.value || '') : '';
+                if (textStats) {
+                    textStats.textContent = `${t1.length} 字符`;
+                }
+                const t2 = resultTextEnhanced ? (resultTextEnhanced.value || '') : '';
+                if (typeof textStatsEnhanced !== 'undefined' && textStatsEnhanced) {
+                    textStatsEnhanced.textContent = `${t2.length} 字符`;
+                }
+                const t3 = (typeof resultTextCloud !== 'undefined' && resultTextCloud) ? (resultTextCloud.value || '') : '';
+                if (typeof textStatsCloud !== 'undefined' && textStatsCloud) {
+                    textStatsCloud.textContent = `${t3.length} 字符`;
+                }
             }
 
             // 更新步骤指示器
@@ -932,7 +978,8 @@
                     const sendAngle = near90 ? angle : -angle;
                     console.log('应用旋转角度(发送到后端):', sendAngle, '预览角度:', angle);
 
-                    const response = await fetch('http://localhost:5000/api/rotate', {
+                    const API_BASE = window.__API_BASE || `${location.protocol}//${location.hostname}:5000`;
+const response = await fetch(`${API_BASE}/api/rotate`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -1181,7 +1228,7 @@ function calculateImageCoordinates(cropArea) {
             }
 
             // 执行OCR
-            async function performOCR(quiet = false) {
+            async function performOCR(quiet = false, variant = null) {
                 if (!currentImage) return;
                 
                 if (!quiet) showLoading('识别中...');
@@ -1239,10 +1286,12 @@ function calculateImageCoordinates(cropArea) {
                         crop_area: actualCropArea,
                         engine: window.__useCloudOCR ? 'doubao' : undefined
                     };
+                    // 不再区分 variant，本地统一走合并后的管线
                     console.log('发送到后端的裁剪区域:', requestData.crop_area);
                     
                     // 修改API端点为正确的后端地址
-                    const response = await fetch('http://localhost:5000/api/ocr', {
+                    const API_BASE = window.__API_BASE || `${location.protocol}//${location.hostname}:5000`;
+const response = await fetch(`${API_BASE}/api/ocr`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -1252,7 +1301,19 @@ function calculateImageCoordinates(cropArea) {
                     
                     const data = await response.json();
                     if (data.success) {
-                        resultText.value = data.text;
+                        // 三种路由：云端、本地主结果、本地备选
+                        if (window.__useCloudOCR && typeof resultTextCloud !== 'undefined' && resultTextCloud) {
+                            resultTextCloud.value = data.text || '';
+                        } else {
+                            // 主结果放到“优化识别”
+                            if (typeof resultTextEnhanced !== 'undefined' && resultTextEnhanced) {
+                                resultTextEnhanced.value = data.text || '';
+                            }
+                            // 备选结果[0]放到“原始识别”，便于对比
+                            if (typeof resultText !== 'undefined' && resultText && Array.isArray(data.alternatives) && data.alternatives.length > 0) {
+                                resultText.value = data.alternatives[0] || '';
+                            }
+                        }
                         resultPlaceholder.classList.add('hidden');
                         resultContainer.classList.remove('hidden');
                         updateTextStats();
@@ -1267,94 +1328,12 @@ function calculateImageCoordinates(cropArea) {
                 }
             }
 
-            // 执行表格识别
-            async function recognizeTable() {
-                if (!currentImage) return;
-                
-                showLoading('表格识别中...');
-                
-                try {
-                    // 每次识别前都根据当前框选计算最新图像坐标，避免旧缓存导致整图识别
-                    let actualCropArea = calculateImageCoordinates(savedCropSelection || cropSelection);
-                    console.log('计算得到的裁剪区域(像素坐标):', actualCropArea);
-                    
-                    // 坐标取整：起点向下取整、终点向上取整，避免边界被截断
-                    actualCropArea.x1 = Math.floor(actualCropArea.x1 || 0);
-                    actualCropArea.y1 = Math.floor(actualCropArea.y1 || 0);
-                    actualCropArea.x2 = Math.ceil(actualCropArea.x2 || 0);
-                    actualCropArea.y2 = Math.ceil(actualCropArea.y2 || 0);
-
-                    // 最小框选校验，避免发送过小或无效区域
-                    const areaW = Math.max(0, actualCropArea.x2 - actualCropArea.x1);
-                    const areaH = Math.max(0, actualCropArea.y2 - actualCropArea.y1);
-                    if (areaW < 20 || areaH < 20) {
-                        hideLoading();
-                        showToast('选择区域过小或无效，请重新框选', false);
-                        return;
-                    }
-
-                    // 在UI提示当前裁剪坐标，便于确认与预览一致
-                    showToast(`裁剪坐标(表格): x1=${actualCropArea.x1}, y1=${actualCropArea.y1}, x2=${actualCropArea.x2}, y2=${actualCropArea.y2}`);
-                    
-                    // 直接在前端裁剪并发送裁剪后的图像，彻底避免坐标换算误差
-                    const croppedDataUrl = await getCroppedImageBase64(currentImage, actualCropArea);
-                    const requestData = {
-                        image: croppedDataUrl.split(',')[1],
-                        crop_area: actualCropArea
-                    };
-                    console.log('发送到后端的裁剪区域(表格识别):', requestData.crop_area);
-                    
-                    // 修改API端点为正确的后端地址
-                    const response = await fetch('http://localhost:5000/api/recognize-table', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(requestData)
-                    });
-                    
-                    const data = await response.json();
-                    if (data.success) {
-                        // 显示表格结果
-                        if (data.table_html) {
-                            // 如果后端返回HTML格式的表格
-                            resultText.value = data.table_text;
-                            
-                            // 创建表格预览区域
-                            const tablePreview = document.createElement('div');
-                            tablePreview.className = 'mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200 overflow-x-auto table-preview';
-                            tablePreview.innerHTML = data.table_html;
-                            
-                            // 插入到结果容器中
-                            const resultContainer = document.getElementById('result-container');
-                            const existingTablePreview = resultContainer.querySelector('.table-preview');
-                            if (existingTablePreview) {
-                                existingTablePreview.remove();
-                            }
-                            resultContainer.appendChild(tablePreview);
-                        } else {
-                            // 纯文本形式的表格
-                            resultText.value = data.table_text || '无法识别表格结构';
-                        }
-                        
-                        resultPlaceholder.classList.add('hidden');
-                        resultContainer.classList.remove('hidden');
-                        updateTextStats();
-                        hideLoading();
-                        showToast('表格识别成功');
-                    } else {
-                        throw new Error(data.error || '表格识别失败');
-                    }
-                } catch (error) {
-                    console.error('表格识别错误:', error);
-                    hideLoading();
-                    showToast('表格识别失败', false);
-                }
-            }
-            
-            // 保存为Word文档
-            async function saveAsWord() {
-                if (!resultText.value.trim()) {
+            // 已移除表格识别功能            
+            // 保存为Word文档（按目标）
+            async function saveAsWordFor(targetId, label = 'origin') {
+                const el = document.getElementById(targetId);
+                const text = el ? (el.value || '') : '';
+                if (!text.trim()) {
                     showToast('没有内容可保存', false);
                     return;
                 }
@@ -1369,9 +1348,8 @@ function calculateImageCoordinates(cropArea) {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            text: resultText.value,
-                            // 如果有表格HTML，也一并发送
-                            has_table: document.querySelector('.table-preview') !== null
+                            text,
+                            has_table: false
                         })
                     });
                     
@@ -1381,7 +1359,7 @@ function calculateImageCoordinates(cropArea) {
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = `ocr_result_${new Date().getTime()}.docx`;
+                        a.download = `ocr_result_${label}_${new Date().getTime()}.docx`;
                         document.body.appendChild(a);
                         a.click();
                         document.body.removeChild(a);
@@ -1398,17 +1376,20 @@ function calculateImageCoordinates(cropArea) {
                     showToast('保存Word文档失败', false);
                     
                     // 降级方案：如果后端API不可用，使用前端创建简单的文本文件
-                    const blob = new Blob([resultText.value], { type: 'text/plain' });
+                    const blob = new Blob([text], { type: 'text/plain' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `ocr_result_${new Date().getTime()}.txt`;
+                    a.download = `ocr_result_${label}_${new Date().getTime()}.txt`;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                 }
             }
+
+            // 向后兼容（默认保存原始识别）
+            async function saveAsWord() { return saveAsWordFor('result-text', 'origin'); }
 
             // 复制文本
             function copyText() {
@@ -1512,19 +1493,27 @@ function calculateImageCoordinates(cropArea) {
                 }
             }
 
-            // 下载文本
-            function downloadText() {
-                const text = resultText.value;
+            // 按目标导出TXT
+            function downloadTextFor(targetId, label = 'origin') {
+                const el = document.getElementById(targetId);
+                const text = el ? (el.value || '') : '';
+                if (!text.trim()) { showToast('没有内容可导出', false); return; }
                 const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `docvision_result_${new Date().getTime()}.txt`;
+                a.download = `docvision_${label}_${new Date().getTime()}.txt`;
                 a.click();
                 URL.revokeObjectURL(url);
                 showToast('文本已下载');
             }
 
+            // 向后兼容（默认导出原始识别）
+            function downloadText() { return downloadTextFor('result-text', 'origin'); }
+
+            // 已移除导出CSV功能按钮及函数
+            // 已移除导出HTML功能按钮及函数
+            // 已移除视图切换功能
             // 导航栏滚动效果
             window.addEventListener('scroll', function() {
                 if (window.scrollY > 10) {
@@ -1642,12 +1631,21 @@ function calculateImageCoordinates(cropArea) {
             safeBindEvent('retake', 'click', triggerReupload);
             safeBindEvent('start-ocr', 'click', () => { window.__useCloudOCR = false; performOCR(false); });
             safeBindEvent('start-ocr-doubao', 'click', () => { window.__useCloudOCR = true; performOCR(false); });
-            safeBindEvent('recognize-table', 'click', recognizeTable);
+
             safeBindEvent('copy-text', 'click', copyText);
             safeBindEvent('fix-text', 'click', fixText);
             safeBindEvent('fix-text-llm', 'click', fixTextLLM);
             safeBindEvent('llm-extract', 'click', llmExtract);
             safeBindEvent('download-text', 'click', downloadText);
+            // 分结果导出（TXT）
+            safeBindEvent('download-text-original', 'click', () => downloadTextFor('result-text', 'origin'));
+            safeBindEvent('download-text-enhanced', 'click', () => downloadTextFor('result-text-enhanced', 'enhanced'));
+            safeBindEvent('download-text-cloud', 'click', () => downloadTextFor('result-text-cloud', 'cloud'));
+            // 分结果导出（Word）
+            safeBindEvent('save-as-word-original', 'click', () => saveAsWordFor('result-text', 'origin'));
+            safeBindEvent('save-as-word-enhanced', 'click', () => saveAsWordFor('result-text-enhanced', 'enhanced'));
+            safeBindEvent('save-as-word-cloud', 'click', () => saveAsWordFor('result-text-cloud', 'cloud'));
+            // 已移除表格相关事件绑定
             safeBindEvent('upload-file', 'click', triggerFileUpload);
             
             // 步骤切换按钮事件
@@ -1777,6 +1775,12 @@ function calculateImageCoordinates(cropArea) {
             // 文本区域变化事件
             if (resultText) {
                 resultText.addEventListener('input', updateTextStats);
+            }
+            if (resultTextEnhanced) {
+                resultTextEnhanced.addEventListener('input', updateTextStats);
+            }
+            if (typeof resultTextCloud !== 'undefined' && resultTextCloud) {
+                resultTextCloud.addEventListener('input', updateTextStats);
             }
             });
     </script>
