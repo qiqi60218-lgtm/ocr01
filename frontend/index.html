@@ -265,7 +265,7 @@
                     
                     <div id="result-container" class="hidden">
                         <div class="space-y-6">
-                            <div>
+                            <div class="hidden">
                                 <div class="mb-2 text-slate-600 font-medium flex items-center justify-between">
                                     <span>原始识别</span>
                                     <div class="flex gap-2">
@@ -278,7 +278,7 @@
                             </div>
                             <div>
                                 <div class="mb-2 text-slate-600 font-medium flex items-center justify-between">
-                                    <span>优化识别</span>
+                                    <span>本地识别</span>
                                     <div class="flex gap-2">
                                         <button id="download-text-enhanced" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出TXT"><i class="fa fa-file-text-o"></i></button>
                                         <button id="save-as-word-enhanced" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出Word"><i class="fa fa-file-word-o"></i></button>
@@ -542,12 +542,8 @@
                 loadingModal.classList.add('hidden');
             }
 
-            // 更新文本统计（原始/优化/云端）
+            // 更新文本统计（本地/云端）
             function updateTextStats() {
-                const t1 = resultText ? (resultText.value || '') : '';
-                if (textStats) {
-                    textStats.textContent = `${t1.length} 字符`;
-                }
                 const t2 = resultTextEnhanced ? (resultTextEnhanced.value || '') : '';
                 if (typeof textStatsEnhanced !== 'undefined' && textStatsEnhanced) {
                     textStatsEnhanced.textContent = `${t2.length} 字符`;
@@ -1305,13 +1301,9 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
                         if (window.__useCloudOCR && typeof resultTextCloud !== 'undefined' && resultTextCloud) {
                             resultTextCloud.value = data.text || '';
                         } else {
-                            // 主结果放到“优化识别”
+                            // 本地识别结果仅写入“本地识别”
                             if (typeof resultTextEnhanced !== 'undefined' && resultTextEnhanced) {
                                 resultTextEnhanced.value = data.text || '';
-                            }
-                            // 备选结果[0]放到“原始识别”，便于对比
-                            if (typeof resultText !== 'undefined' && resultText && Array.isArray(data.alternatives) && data.alternatives.length > 0) {
-                                resultText.value = data.alternatives[0] || '';
                             }
                         }
                         resultPlaceholder.classList.add('hidden');
@@ -1389,18 +1381,20 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
             }
 
             // 向后兼容（默认保存原始识别）
-            async function saveAsWord() { return saveAsWordFor('result-text', 'origin'); }
+            async function saveAsWord() { return saveAsWordFor('result-text-enhanced', 'local'); }
 
             // 复制文本
             function copyText() {
-                resultText.select();
-                document.execCommand('copy');
-                showToast('文本已复制到剪贴板');
+                if (resultTextEnhanced) {
+                    resultTextEnhanced.select();
+                    document.execCommand('copy');
+                    showToast('文本已复制到剪贴板');
+                }
             }
 
             // 文本纠错（规则）
             async function fixText() {
-                const text = resultText.value.trim();
+                const text = resultTextEnhanced ? resultTextEnhanced.value.trim() : '';
                 if (!text) return;
                 showLoading('文本纠错中...');
                 try {
@@ -1411,7 +1405,7 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
                     });
                     const data = await response.json();
                     if (data.success) {
-                        resultText.value = data.text;
+                        if (resultTextEnhanced) resultTextEnhanced.value = data.text;
                         updateTextStats();
                         showLoading();
                         hideLoading();
@@ -1428,7 +1422,7 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
 
             // 文本纠错（LLM）
             async function fixTextLLM() {
-                const text = resultText.value.trim();
+                const text = resultTextEnhanced ? resultTextEnhanced.value.trim() : '';
                 if (!text) return;
                 showLoading('LLM纠错中...');
                 try {
@@ -1439,7 +1433,7 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
                     });
                     const data = await response.json();
                     if (data.success) {
-                        resultText.value = data.text;
+                        if (resultTextEnhanced) resultTextEnhanced.value = data.text;
                         updateTextStats();
                         hideLoading();
                         showToast('LLM纠错完成');
@@ -1455,7 +1449,7 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
 
             // LLM结构化抽取
             async function llmExtract() {
-                const text = resultText.value.trim();
+                const text = resultTextEnhanced ? resultTextEnhanced.value.trim() : '';
                 if (!text) return;
                 showLoading('结构化抽取中...');
                 try {
@@ -1591,7 +1585,9 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
                 recognizeStage.classList.add('hidden');
                 resultPlaceholder.classList.remove('hidden');
                 resultContainer.classList.add('hidden');
-                resultText.value = '';
+                if (typeof resultTextEnhanced !== 'undefined' && resultTextEnhanced) resultTextEnhanced.value = '';
+                if (typeof resultTextCloud !== 'undefined' && resultTextCloud) resultTextCloud.value = '';
+                updateTextStats();
                 
                 // 重置步骤指示器
                 updateStepIndicator(0);
