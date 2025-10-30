@@ -104,6 +104,8 @@
                     <!-- 图像显示区域 -->
                     <div class="aspect-video bg-slate-100 rounded-xl overflow-hidden relative border-2 border-dashed border-slate-300 hover:border-primary transition-colors cursor-pointer" id="image-container">
                         <img id="captured-image" class="w-full h-full object-contain hidden" alt="已上传的图像">
+                        <!-- 叠加：透视角点标注画布（第二步使用） -->
+                        <canvas id="perspective-canvas" class="absolute inset-0 hidden"></canvas>
                         
                         <!-- 上传占位符 -->
                         <div id="upload-placeholder" class="absolute inset-0 flex flex-col items-center justify-center">
@@ -113,7 +115,7 @@
                         </div>
                     </div>
 
-                    <!-- 流程步骤指示器 -->
+                    <!-- 流程步骤指示器（五步） -->
                     <div id="steps-indicator" class="mt-4 flex justify-between items-center mb-4">
                         <div class="flex-1 flex flex-col items-center">
                             <div id="step-1" class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-medium">1</div>
@@ -124,23 +126,56 @@
                         </div>
                         <div class="flex-1 flex flex-col items-center">
                             <div id="step-2" class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium">2</div>
-                            <span class="text-xs mt-1 text-slate-600">旋转</span>
+                            <span class="text-xs mt-1 text-slate-600">透视</span>
                         </div>
                         <div class="flex-1 flex items-center">
                             <div id="step-line-2-3" class="h-1 bg-slate-200 w-full"></div>
                         </div>
                         <div class="flex-1 flex flex-col items-center">
                             <div id="step-3" class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium">3</div>
-                            <span class="text-xs mt-1 text-slate-600">框选</span>
+                            <span class="text-xs mt-1 text-slate-600">旋转</span>
                         </div>
                         <div class="flex-1 flex items-center">
                             <div id="step-line-3-4" class="h-1 bg-slate-200 w-full"></div>
                         </div>
                         <div class="flex-1 flex flex-col items-center">
                             <div id="step-4" class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium">4</div>
+                            <span class="text-xs mt-1 text-slate-600">框选</span>
+                        </div>
+                        <div class="flex-1 flex items-center">
+                            <div id="step-line-4-5" class="h-1 bg-slate-200 w-full"></div>
+                        </div>
+                        <div class="flex-1 flex flex-col items-center">
+                            <div id="step-5" class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium">5</div>
                             <span class="text-xs mt-1 text-slate-600">识别</span>
                         </div>
                     </div>
+
+                <!-- 透视矫正界面（第二步，可选） -->
+                <div id="perspective-stage" class="mt-6 hidden">
+                    <h4 class="text-center text-slate-600 mb-2">透视矫正（可选）</h4>
+                    <p class="text-center text-xs text-slate-500 mb-3">可在图像上依次点击标注四个角点（左上→右上→右下→左下），再执行矫正</p>
+                    <div class="flex gap-3">
+                        <button id="skip-perspective" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-arrow-right mr-2"></i>跳过矫正，进入旋转
+                        </button>
+                        <button id="apply-perspective" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-magic mr-2"></i>执行矫正并进入旋转
+                        </button>
+                        <button id="clear-perspective-points" class="px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-eraser mr-2"></i>清除角点
+                        </button>
+                        <button id="back-to-upload" class="px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-arrow-left mr-2"></i>返回上传
+                        </button>
+                    </div>
+                    <div id="perspective-overlay-container" class="bg-slate-50 rounded-lg border border-slate-200 p-3 mt-4 hidden">
+                        <h5 class="text-sm font-medium text-slate-600 mb-2">矫正边界预览</h5>
+                        <div class="bg-white rounded-lg overflow-auto border border-slate-200 max-h-[50vh] flex items-center justify-center">
+                            <img id="perspective-overlay" class="block" alt="透视矫正边界预览">
+                        </div>
+                    </div>
+                </div>
 
                 <!-- 旋转界面 -->
                 <div id="rotate-stage" class="mt-6 hidden space-y-4">
@@ -172,6 +207,9 @@
                     </div>
                     
                     <div class="flex gap-3">
+                        <button id="back-to-perspective" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-arrow-left mr-2"></i>返回透视
+                        </button>
                         <button id="next-to-crop" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
                             <i class="fa fa-arrow-right mr-2"></i>下一步：框选
                         </button>
@@ -202,6 +240,12 @@
                 <div id="recognize-stage" class="mt-6 hidden space-y-4">
                     <h4 class="text-center text-slate-600">选择识别方式</h4>
                     
+                    <div class="flex gap-3">
+                        <button id="back-to-crop" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+                            <i class="fa fa-arrow-left mr-2"></i>返回框选
+                        </button>
+                    </div>
+                    
                     <!-- 自动识别开关（已移除1:1像素预览） -->
                     <div class="flex items-center justify-center gap-4 text-sm text-slate-600">
                         <label class="flex items-center gap-2"><input id="auto-ocr-toggle" type="checkbox" class="w-4 h-4" checked>实时自动识别</label>
@@ -218,6 +262,9 @@
                     <div class="flex gap-3">
                         <button id="start-ocr" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all" title="本地识别">
                             <i class="fa fa-file-text-o mr-2"></i>开始识别
+                        </button>
+                        <button id="start-ocr-rapid" class="flex-1 bg-primary/70 hover:bg-primary/80 text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all" title="本地识别2（RapidOCR）">
+                            <i class="fa fa-bolt mr-2"></i>本地识别2
                         </button>
                         <button id="start-ocr-doubao" class="flex-1 bg-primary/80 hover:bg-primary text-white py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all" title="豆包云端识别">
                             <i class="fa fa-cloud mr-2"></i>云端识别
@@ -286,6 +333,17 @@
                                 </div>
                                 <textarea id="result-text-enhanced" class="w-full min-h-[420px] p-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all resize-none"></textarea>
                                 <div class="mt-2 text-xs text-slate-500"><span id="text-stats-enhanced">0 字符</span></div>
+                            </div>
+                            <div>
+                                <div class="mb-2 text-slate-600 font-medium flex items-center justify-between">
+                                    <span>本地识别2</span>
+                                    <div class="flex gap-2">
+                                        <button id="download-text-local2" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出TXT"><i class="fa fa-file-text-o"></i></button>
+                                        <button id="save-as-word-local2" class="text-xs px-2 py-1 rounded hover:bg-slate-100 text-slate-600" title="导出Word"><i class="fa fa-file-word-o"></i></button>
+                                    </div>
+                                </div>
+                                <textarea id="result-text-local2" class="w-full min-h-[420px] p-4 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all resize-none"></textarea>
+                                <div class="mt-2 text-xs text-slate-500"><span id="text-stats-local2">0 字符</span></div>
                             </div>
                             <div>
                                 <div class="mb-2 text-slate-600 font-medium flex items-center justify-between">
@@ -463,11 +521,13 @@
             const resultPlaceholder = document.getElementById('result-placeholder');
             const resultContainer = document.getElementById('result-container');
             const resultText = document.getElementById('result-text');
-            const resultTextEnhanced = document.getElementById('result-text-enhanced');
-            const resultTextCloud = document.getElementById('result-text-cloud');
+const resultTextEnhanced = document.getElementById('result-text-enhanced');
+const resultTextLocal2 = document.getElementById('result-text-local2');
+const resultTextCloud = document.getElementById('result-text-cloud');
             const textStats = document.getElementById('text-stats');
-            const textStatsEnhanced = document.getElementById('text-stats-enhanced');
-            const textStatsCloud = document.getElementById('text-stats-cloud');
+const textStatsEnhanced = document.getElementById('text-stats-enhanced');
+const textStatsLocal2 = document.getElementById('text-stats-local2');
+const textStatsCloud = document.getElementById('text-stats-cloud');
             const loadingModal = document.getElementById('loading-modal');
             const loadingText = document.getElementById('loading-text');
             const toast = document.getElementById('toast');
@@ -497,11 +557,19 @@
             const step2 = document.getElementById('step-2');
             const step3 = document.getElementById('step-3');
             const step4 = document.getElementById('step-4');
+            const step5 = document.getElementById('step-5');
             const stepLine12 = document.getElementById('step-line-1-2');
             const stepLine23 = document.getElementById('step-line-2-3');
             const stepLine34 = document.getElementById('step-line-3-4');
+            const stepLine45 = document.getElementById('step-line-4-5');
+
+            // 新增：透视界面元素
+            const perspectiveStage = document.getElementById('perspective-stage');
+            const perspectiveOverlayContainer = document.getElementById('perspective-overlay-container');
+            const perspectiveOverlay = document.getElementById('perspective-overlay');
 
             // 状态变量
+            let originalImage = null; // 上传完成的原始图（未透视、未旋转）
             let currentImage = null;
             let currentRotation = 0;
             let currentStep = 0; // 0: 初始状态, 1: 上传完成, 2: 旋转完成, 3: 框选完成
@@ -548,20 +616,24 @@
                 if (typeof textStatsEnhanced !== 'undefined' && textStatsEnhanced) {
                     textStatsEnhanced.textContent = `${t2.length} 字符`;
                 }
+                const t4 = (typeof resultTextLocal2 !== 'undefined' && resultTextLocal2) ? (resultTextLocal2.value || '') : '';
+                if (typeof textStatsLocal2 !== 'undefined' && textStatsLocal2) {
+                    textStatsLocal2.textContent = `${t4.length} 字符`;
+                }
                 const t3 = (typeof resultTextCloud !== 'undefined' && resultTextCloud) ? (resultTextCloud.value || '') : '';
                 if (typeof textStatsCloud !== 'undefined' && textStatsCloud) {
                     textStatsCloud.textContent = `${t3.length} 字符`;
                 }
             }
 
-            // 更新步骤指示器
+            // 更新步骤指示器（五步）
             function updateStepIndicator(step) {
                 // 重置所有步骤
-                const steps = [step1, step2, step3, step4];
+                const steps = [step1, step2, step3, step4, step5];
                 for (let i = 0; i < steps.length; i++) {
                     steps[i].className = 'w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-medium';
                 }
-                const lines = [stepLine12, stepLine23, stepLine34];
+                const lines = [stepLine12, stepLine23, stepLine34, stepLine45];
                 for (let j = 0; j < lines.length; j++) {
                     lines[j].className = 'h-1 bg-slate-200 w-full';
                 }
@@ -582,15 +654,197 @@
                     step4.className = 'w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-medium';
                     stepLine34.className = 'h-1 bg-primary w-full';
                 }
+                if (step >= 5) {
+                    step5.className = 'w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-medium';
+                    stepLine45.className = 'h-1 bg-primary w-full';
+                }
+            }
+
+            // 新增：进入透视界面
+            function enterPerspectiveStage() {
+                updateStepIndicator(2);
+                perspectiveStage.classList.remove('hidden');
+                rotateStage.classList.add('hidden');
+                cropStage.classList.add('hidden');
+                recognizeStage.classList.add('hidden');
+                // 进入透视时，强制恢复为上传原图（未旋转、未透视）
+                if (originalImage) {
+                    currentImage = originalImage;
+                    capturedImage.src = originalImage;
+                    currentRotation = 0;
+                    capturedImage.style.transform = 'none';
+                }
+                // 隐藏矫正叠加预览，避免误导
+                if (perspectiveOverlayContainer) perspectiveOverlayContainer.classList.add('hidden');
+                if (perspectiveOverlay) perspectiveOverlay.src = '';
+                currentStep = 1;
+                try {
+                    // 初始化角点数组
+                    window.perspectivePoints = [];
+                    // 显示并适配画布尺寸
+                    const container = document.getElementById('image-container');
+                    const imgEl = document.getElementById('captured-image');
+                    const canvas = document.getElementById('perspective-canvas');
+                    if (container && imgEl && canvas) {
+                        canvas.classList.remove('hidden');
+                        const rect = container.getBoundingClientRect();
+                        canvas.width = rect.width;
+                        canvas.height = rect.height;
+                        // 绘制工具
+                        const ctx = canvas.getContext('2d');
+                        const draw = () => {
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            // 画已选角点与连线（容器坐标）
+                            ctx.fillStyle = '#10b981';
+                            ctx.strokeStyle = '#10b981';
+                            ctx.lineWidth = 2;
+                            for (let i = 0; i < (window.perspectivePoints || []).length; i++) {
+                                const p = window.perspectivePoints[i];
+                                // 将图像坐标映射到容器坐标
+                                const { x: cx, y: cy } = imageToContainer(p.x, p.y, imgEl, container);
+                                ctx.beginPath();
+                                ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+                                ctx.fill();
+                                // 连线
+                                if (i > 0) {
+                                    const p0 = window.perspectivePoints[i - 1];
+                                    const c0 = imageToContainer(p0.x, p0.y, imgEl, container);
+                                    ctx.beginPath();
+                                    ctx.moveTo(c0.x, c0.y);
+                                    ctx.lineTo(cx, cy);
+                                    ctx.stroke();
+                                }
+                            }
+                            // 闭合四边形
+                            if ((window.perspectivePoints || []).length === 4) {
+                                const p0 = window.perspectivePoints[0];
+                                const c0 = imageToContainer(p0.x, p0.y, imgEl, container);
+                                const p3 = window.perspectivePoints[3];
+                                const c3 = imageToContainer(p3.x, p3.y, imgEl, container);
+                                ctx.beginPath();
+                                ctx.moveTo(c3.x, c3.y);
+                                ctx.lineTo(c0.x, c0.y);
+                                ctx.stroke();
+                            }
+                        };
+                        // 坐标转换：图像坐标 -> 容器坐标
+                        const imageToContainer = (ix, iy, img, cont) => {
+                            const cRect = cont.getBoundingClientRect();
+                            const cw = cRect.width, ch = cRect.height;
+                            const nw = img.naturalWidth, nh = img.naturalHeight;
+                            if (!nw || !nh) return { x: ix, y: iy };
+                            const scale = Math.min(cw / nw, ch / nh);
+                            const dw = nw * scale, dh = nh * scale;
+                            const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+                            return { x: ox + ix * scale, y: oy + iy * scale };
+                        };
+                        // 容器坐标 -> 图像坐标
+                        const containerToImage = (cx, cy, img, cont) => {
+                            const cRect = cont.getBoundingClientRect();
+                            const cw = cRect.width, ch = cRect.height;
+                            const nw = img.naturalWidth, nh = img.naturalHeight;
+                            if (!nw || !nh) return { x: cx, y: cy };
+                            const scale = Math.min(cw / nw, ch / nh);
+                            const dw = nw * scale, dh = nh * scale;
+                            const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+                            return { x: (cx - ox) / scale, y: (cy - oy) / scale };
+                        };
+                        // 点击添加角点（最多四个）
+                        const onClick = (ev) => {
+                            const cRect = canvas.getBoundingClientRect();
+                            const cx = ev.clientX - cRect.left;
+                            const cy = ev.clientY - cRect.top;
+                            const { x, y } = containerToImage(cx, cy, imgEl, container);
+                            if (!window.perspectivePoints) window.perspectivePoints = [];
+                            if (window.perspectivePoints.length < 4) {
+                                window.perspectivePoints.push({ x, y });
+                            } else {
+                                // 达到四个后，从头开始替换
+                                window.perspectivePoints = [{ x, y }];
+                            }
+                            draw();
+                        };
+                        // 绑定一次
+                        if (!canvas.__bound) {
+                            canvas.addEventListener('click', onClick);
+                            canvas.__bound = true;
+                        }
+                        // 清除角点按钮
+                        const clearBtn = document.getElementById('clear-perspective-points');
+                        if (clearBtn && !clearBtn.__bound) {
+                            clearBtn.addEventListener('click', () => { window.perspectivePoints = []; draw(); });
+                            clearBtn.__bound = true;
+                        }
+                        // 初次绘制
+                        draw();
+                    }
+                } catch (e) {
+                    console.warn('初始化透视画布失败:', e);
+                }
+            }
+
+            // 新增：执行透视矫正并进入旋转
+            async function applyPerspective() {
+                if (!currentImage) { showToast('请先上传图片', false); return; }
+                showLoading('透视矫正中...');
+                try {
+                    const API_BASE = window.__API_BASE || `${location.protocol}//${location.hostname}:5000`;
+                    const points = (window.perspectivePoints && window.perspectivePoints.length === 4) ? window.perspectivePoints.map(p => ({ x: Number(p.x), y: Number(p.y) })) : undefined;
+                    const payload = { image: currentImage.split(',')[1] };
+                    if (points) payload.points = points.map(p => [p.x, p.y]);
+                    const response = await fetch(`${API_BASE}/api/perspective`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await response.json();
+                    if (data.success && data.image) {
+                        currentImage = data.image;
+                        currentRotation = 0;
+                        capturedImage.src = currentImage;
+                        capturedImage.style.transform = 'none';
+                        // 显示边界叠加预览（如果返回）
+                        if (data.overlay && perspectiveOverlay) {
+                            perspectiveOverlay.src = data.overlay;
+                            if (perspectiveOverlayContainer) perspectiveOverlayContainer.classList.remove('hidden');
+                        }
+                        showToast(points ? '按手动角点矫正成功，进入旋转' : '矫正成功，进入旋转');
+                    } else {
+                        showToast('透视矫正失败，已跳过', false);
+                    }
+                } catch (e) {
+                    console.error('透视矫正错误:', e);
+                    showToast('透视矫正异常，已跳过', false);
+                } finally {
+                    hideLoading();
+                    enterRotateStage();
+                }
             }
 
             // 进入旋转界面
             function enterRotateStage() {
-                updateStepIndicator(2);
+                updateStepIndicator(3);
+                // 隐藏透视画布
+                const canvas = document.getElementById('perspective-canvas');
+                if (canvas) canvas.classList.add('hidden');
+                perspectiveStage.classList.add('hidden');
                 rotateStage.classList.remove('hidden');
                 cropStage.classList.add('hidden');
                 recognizeStage.classList.add('hidden');
-                currentStep = 1;
+                currentStep = 2;
+            }
+
+            // 返回到上传步骤
+            function enterUploadStep() {
+                updateStepIndicator(1);
+                document.getElementById('perspective-stage')?.classList.add('hidden');
+                document.getElementById('rotate-stage')?.classList.add('hidden');
+                document.getElementById('crop-stage')?.classList.add('hidden');
+                document.getElementById('recognize-stage')?.classList.add('hidden');
+                document.getElementById('upload-placeholder')?.classList.remove('hidden');
+                document.getElementById('captured-image')?.classList.add('hidden');
+                document.getElementById('perspective-canvas')?.classList.add('hidden');
+                if (typeof showToast === 'function') showToast('已返回上传步骤');
             }
 
             // 进入框选界面（自动应用未提交的预览旋转）
@@ -626,8 +880,8 @@
                     console.warn('自动应用预览旋转失败，继续进入框选:', e);
                 }
 
-                // 合并第三、第四步：进入裁剪界面时同时展示识别界面
-                updateStepIndicator(4);
+                // 合并第四、第五步：进入裁剪界面时同时展示识别界面
+            updateStepIndicator(5);
                 rotateStage.classList.add('hidden');
                 cropStage.classList.remove('hidden');
                 recognizeStage.classList.remove('hidden');
@@ -712,7 +966,7 @@
 
             // 识别界面已与裁剪界面合并，保留预览与坐标兜底逻辑
             function enterRecognizeStage() {
-                updateStepIndicator(4);
+                updateStepIndicator(5);
                 rotateStage.classList.add('hidden');
                 cropStage.classList.remove('hidden');
                 recognizeStage.classList.remove('hidden');
@@ -905,6 +1159,7 @@
                 const reader = new FileReader();
                 reader.onload = function(event) {
                     currentImage = event.target.result;
+                    originalImage = currentImage; // 保存上传原始图基线
                     currentRotation = 0;
                     
                     uploadPlaceholder.classList.add('hidden');
@@ -918,10 +1173,10 @@
                         mainActions.classList.add('hidden');
                     }
                     
-                    // 进入旋转界面
-                    enterRotateStage();
+                    // 进入透视界面（新增第二步）
+                    enterPerspectiveStage();
                     
-                    showToast('文件上传成功');
+                    showToast('文件上传成功，请选择是否进行透视矫正');
                 };
                 reader.readAsDataURL(file);
             }
@@ -1280,7 +1535,7 @@ function calculateImageCoordinates(cropArea) {
                     const requestData = {
                         image: croppedDataUrl.split(',')[1],
                         crop_area: actualCropArea,
-                        engine: window.__useCloudOCR ? 'doubao' : undefined
+                        engine: window.__useCloudOCR ? 'doubao' : (window.__useRapidOCR ? 'rapid' : undefined)
                     };
                     // 不再区分 variant，本地统一走合并后的管线
                     console.log('发送到后端的裁剪区域:', requestData.crop_area);
@@ -1300,8 +1555,11 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
                         // 三种路由：云端、本地主结果、本地备选
                         if (window.__useCloudOCR && typeof resultTextCloud !== 'undefined' && resultTextCloud) {
                             resultTextCloud.value = data.text || '';
+                        } else if (window.__useRapidOCR && typeof resultTextLocal2 !== 'undefined' && resultTextLocal2) {
+                            // RapidOCR结果写入“本地识别2”
+                            resultTextLocal2.value = data.text || '';
                         } else {
-                            // 本地识别结果仅写入“本地识别”
+                            // 默认本地识别结果写入“本地识别”
                             if (typeof resultTextEnhanced !== 'undefined' && resultTextEnhanced) {
                                 resultTextEnhanced.value = data.text || '';
                             }
@@ -1586,6 +1844,7 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
                 resultPlaceholder.classList.remove('hidden');
                 resultContainer.classList.add('hidden');
                 if (typeof resultTextEnhanced !== 'undefined' && resultTextEnhanced) resultTextEnhanced.value = '';
+                if (typeof resultTextLocal2 !== 'undefined' && resultTextLocal2) resultTextLocal2.value = '';
                 if (typeof resultTextCloud !== 'undefined' && resultTextCloud) resultTextCloud.value = '';
                 updateTextStats();
                 
@@ -1625,8 +1884,13 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
             safeBindEvent('rotate-right', 'click', () => quickRotate(90));
             // 已移除增强功能绑定
             safeBindEvent('retake', 'click', triggerReupload);
-            safeBindEvent('start-ocr', 'click', () => { window.__useCloudOCR = false; performOCR(false); });
-            safeBindEvent('start-ocr-doubao', 'click', () => { window.__useCloudOCR = true; performOCR(false); });
+            // 新增：透视矫正按钮事件
+            safeBindEvent('apply-perspective', 'click', applyPerspective);
+            safeBindEvent('skip-perspective', 'click', () => enterRotateStage());
+            safeBindEvent('clear-perspective-points', 'click', () => { window.perspectivePoints = []; const c = document.getElementById('perspective-canvas'); if (c) { const ctx = c.getContext('2d'); ctx && ctx.clearRect(0,0,c.width,c.height); } });
+            safeBindEvent('start-ocr', 'click', () => { window.__useCloudOCR = false; window.__useRapidOCR = false; performOCR(false); });
+safeBindEvent('start-ocr-rapid', 'click', () => { window.__useCloudOCR = false; window.__useRapidOCR = true; performOCR(false); });
+safeBindEvent('start-ocr-doubao', 'click', () => { window.__useCloudOCR = true; window.__useRapidOCR = false; performOCR(false); });
 
             safeBindEvent('copy-text', 'click', copyText);
             safeBindEvent('fix-text', 'click', fixText);
@@ -1636,11 +1900,13 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
             // 分结果导出（TXT）
             safeBindEvent('download-text-original', 'click', () => downloadTextFor('result-text', 'origin'));
             safeBindEvent('download-text-enhanced', 'click', () => downloadTextFor('result-text-enhanced', 'enhanced'));
-            safeBindEvent('download-text-cloud', 'click', () => downloadTextFor('result-text-cloud', 'cloud'));
+safeBindEvent('download-text-local2', 'click', () => downloadTextFor('result-text-local2', 'local2'));
+safeBindEvent('download-text-cloud', 'click', () => downloadTextFor('result-text-cloud', 'cloud'));
             // 分结果导出（Word）
             safeBindEvent('save-as-word-original', 'click', () => saveAsWordFor('result-text', 'origin'));
             safeBindEvent('save-as-word-enhanced', 'click', () => saveAsWordFor('result-text-enhanced', 'enhanced'));
-            safeBindEvent('save-as-word-cloud', 'click', () => saveAsWordFor('result-text-cloud', 'cloud'));
+safeBindEvent('save-as-word-local2', 'click', () => saveAsWordFor('result-text-local2', 'local2'));
+safeBindEvent('save-as-word-cloud', 'click', () => saveAsWordFor('result-text-cloud', 'cloud'));
             // 已移除表格相关事件绑定
             safeBindEvent('upload-file', 'click', triggerFileUpload);
             
@@ -1649,6 +1915,16 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
             safeBindEvent('back-to-rotate', 'click', function() {
                 revertAutoAppliedRotationIfNeeded();
                 enterRotateStage();
+            });
+            safeBindEvent('back-to-perspective', 'click', function() {
+                revertAutoAppliedRotationIfNeeded();
+                enterPerspectiveStage();
+            });
+            safeBindEvent('back-to-upload', 'click', enterUploadStep);
+            safeBindEvent('back-to-crop', 'click', function() {
+                updateStepIndicator(4);
+                document.getElementById('crop-stage')?.classList.remove('hidden');
+                document.getElementById('recognize-stage')?.classList.add('hidden');
             });
             safeBindEvent('next-to-recognize', 'click', function() {
                 // 点击即框选整张图像内容矩形（object-contain），忽略已有选区
@@ -1774,6 +2050,9 @@ const response = await fetch(`${API_BASE}/api/ocr`, {
             }
             if (resultTextEnhanced) {
                 resultTextEnhanced.addEventListener('input', updateTextStats);
+            }
+            if (typeof resultTextLocal2 !== 'undefined' && resultTextLocal2) {
+                resultTextLocal2.addEventListener('input', updateTextStats);
             }
             if (typeof resultTextCloud !== 'undefined' && resultTextCloud) {
                 resultTextCloud.addEventListener('input', updateTextStats);

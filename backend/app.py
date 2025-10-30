@@ -21,6 +21,11 @@ from flask_cors import CORS
 from docx import Document
 from docx.shared import Inches
 from dotenv import load_dotenv
+# RapidOCR 引擎
+try:
+    from rapidocr_onnxruntime import RapidOCR
+except Exception:
+    RapidOCR = None
 
 # 配置日志
 logging.basicConfig(level=logging.INFO,
@@ -58,6 +63,16 @@ class DocRecognizer:
     def __init__(self):
         # 不再使用tempfile，减少系统资源占用
         self.supported_formats = ['jpg', 'jpeg', 'png', 'bmp']
+        # 初始化 RapidOCR（可选）
+        try:
+            self.rapid_ocr = RapidOCR() if RapidOCR else None
+            if self.rapid_ocr:
+                logger.info("RapidOCR初始化完成")
+            else:
+                logger.warning("RapidOCR未可用或未安装")
+        except Exception as e:
+            self.rapid_ocr = None
+            logger.warning(f"RapidOCR初始化失败: {e}")
         logger.info("DocRecognizer初始化完成")
     
     def crop_image(self, img, crop_area):
@@ -884,6 +899,55 @@ class DocRecognizer:
             logger.error(f"图像编码失败: {str(e)}")
             raise
 
+    def ocr_text_rapid(self, img, crop_area=None):
+        """使用RapidOCR进行本地识别，返回主结果，备选为空。"""
+        if img is None:
+            raise ValueError("输入图像为空")
+        if self.rapid_ocr is None:
+            raise ValueError("RapidOCR未初始化或不可用")
+        try:
+            # 可选裁剪
+            if crop_area:
+                img = self.crop_image(img, crop_area)
+            # 转换为BGR以适配OpenCV风格
+            if img.ndim == 3:
+                bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            else:
+                bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            # 调用RapidOCR，并兼容返回形式 (result_list, elapse)
+            res = self.rapid_ocr(bgr)
+            results = []
+            if isinstance(res, tuple):
+                results = res[0] or []
+                try:
+                    elapse = res[1]
+                    logger.info(f"RapidOCR耗时: {elapse}s, 检测到{len(results)}项")
+                except Exception:
+                    logger.info(f"RapidOCR返回{len(results)}项")
+            else:
+                results = res or []
+                logger.info(f"RapidOCR返回{len(results)}项")
+            # results: list of [box, text, score]
+            texts = []
+            for item in results:
+                try:
+                    # 兼容不同结构：([box], text, score) 或 dict
+                    if isinstance(item, (list, tuple)) and len(item) >= 2:
+                        text = item[1]
+                    elif isinstance(item, dict):
+                        text = item.get('text') or item.get('label')
+                    else:
+                        text = None
+                    if isinstance(text, str) and text.strip():
+                        texts.append(text.strip())
+                except Exception:
+                    continue
+            final_text = "\n".join(texts).strip()
+            return { 'text': final_text, 'alternatives': [] }
+        except Exception as e:
+            logger.error(f"RapidOCR识别失败: {str(e)}")
+            raise
+
 # 全局识别器实例
 recognizer = DocRecognizer()
 
@@ -924,6 +988,155 @@ def index():
     except Exception as e:
         logger.error(f"提供前端页面失败: {str(e)}")
         return jsonify({'error': '无法提供前端页面'}), 500
+
+# 新增：引入透视矫正相关函数（来自测试模块），用于主程序集成
+try:
+    from perspective_test import (
+        find_document_corners,
+        warp_perspective,
+        estimate_skew_angle,
+        draw_boundary_overlay,
+    )
+    logger.info('透视矫正模块已导入')
+except Exception as _e:
+    find_document_corners = None
+    warp_perspective = None
+    estimate_skew_angle = None
+    draw_boundary_overlay = None
+    logger.warning(f'透视矫正模块导入失败: {_e}')
+
+# 新增：透视矫正API（拍照之后、旋转之前调用）
+@app.route('/api/perspective', methods=['POST'])
+def perspective_correct():
+    try:
+        data = request.json or {}
+        if 'image' not in data:
+            return jsonify({'error': '缺少必要参数: image'}), 400
+        if find_document_corners is None:
+            return jsonify({'error': '透视矫正模块不可用'}), 500
+
+        # 解码原图（RGB）并转换为BGR以适配OpenCV处理
+        img_rgb = recognizer.decode_image(data['image'])
+        if img_rgb is None:
+            return jsonify({'error': '图像解码失败'}), 400
+        bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+
+        # 可选的手动角点
+        user_points = data.get('points')
+        used_pts = None
+        mode = 'auto'
+        diagnostics = {}
+
+        if isinstance(user_points, list) and len(user_points) == 4:
+            try:
+                pts = np.array(user_points, dtype=np.float32)
+                used_pts = pts
+                mode = 'manual'
+            except Exception:
+                used_pts = None
+                mode = 'auto'
+
+        if used_pts is None:
+            rect, diag = find_document_corners(bgr)
+            diagnostics = diag or {}
+            if rect is not None:
+                used_pts = rect
+                mode = diagnostics.get('strategy', 'auto')
+            else:
+                mode = 'deskew-only'
+
+        if used_pts is not None:
+            # 绘制边界叠加图与透视变换结果
+            overlay_bgr = draw_boundary_overlay(bgr.copy(), used_pts)
+            warped_bgr = warp_perspective(bgr, used_pts)
+
+            # 透视后：自动纠偏、方向归一化、尺寸归一化
+            try:
+                ang2 = float(estimate_skew_angle(warped_bgr))
+                if abs(ang2) > 0.2:
+                    M2 = cv2.getRotationMatrix2D((warped_bgr.shape[1] / 2.0, warped_bgr.shape[0] / 2.0), -ang2, 1.0)
+                    warped_bgr = cv2.warpAffine(
+                        warped_bgr,
+                        M2,
+                        (warped_bgr.shape[1], warped_bgr.shape[0]),
+                        flags=cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_REPLICATE
+                    )
+                    diagnostics['post_skew_angle'] = ang2
+            except Exception:
+                pass
+
+            # 将长边统一到固定像素，保持比例
+            TARGET_LONG = 1600  # 统一输出尺寸的长边像素
+            h0, w0 = warped_bgr.shape[:2]
+            long_side = max(h0, w0)
+            scale = TARGET_LONG / float(long_side) if long_side > 0 else 1.0
+            nw = int(round(w0 * scale))
+            nh = int(round(h0 * scale))
+            if nw > 0 and nh > 0:
+                warped_bgr = cv2.resize(warped_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+            else:
+                nw, nh = w0, h0
+            diagnostics['normalize'] = {'scale': float(scale), 'size': {'w': nw, 'h': nh}}
+
+            # 统一为竖向正视（需保持与旋转步骤逻辑一致）
+            prefer_portrait = True
+            if prefer_portrait and nw > nh:
+                warped_bgr = cv2.rotate(warped_bgr, cv2.ROTATE_90_CLOCKWISE)
+                nw, nh = nh, nw
+                diagnostics['orientation'] = 'portrait'
+            else:
+                diagnostics['orientation'] = 'landscape'
+
+            # 可选：填充到A4比例画布（不拉伸，只居中留白）
+            PAD_TO_A4 = True
+            if PAD_TO_A4:
+                a4_ratio = 1.4142  # 高/宽
+                canvas_w = nw
+                canvas_h = int(round(canvas_w * a4_ratio))
+                if nh > canvas_h:
+                    canvas_h = nh
+                    canvas_w = int(round(canvas_h / a4_ratio))
+                pad_left = max(0, (canvas_w - nw) // 2)
+                pad_top = max(0, (canvas_h - nh) // 2)
+                canvas = np.full((canvas_h, canvas_w, 3), 255, dtype=np.uint8)
+                canvas[pad_top:pad_top + nh, pad_left:pad_left + nw] = warped_bgr
+                warped_bgr = canvas
+                diagnostics['canvas'] = {'w': int(canvas_w), 'h': int(canvas_h), 'pad_left': int(pad_left), 'pad_top': int(pad_top)}
+
+            # 转回RGB以复用主程序的编码方法
+            overlay_rgb = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
+            warped_rgb = cv2.cvtColor(warped_bgr, cv2.COLOR_BGR2RGB)
+            overlay_b64 = recognizer.encode_image(overlay_rgb)
+            warped_b64 = recognizer.encode_image(warped_rgb)
+            return jsonify({
+                'success': True,
+                'mode': mode,
+                'points': used_pts.astype(float).tolist() if isinstance(used_pts, np.ndarray) else used_pts,
+                'overlay': f'data:image/jpeg;base64,{overlay_b64}',
+                'image': f'data:image/jpeg;base64,{warped_b64}',
+                'diagnostics': diagnostics
+            })
+        else:
+            # 兜底：仅纠偏文字倾斜角度（deskew-only），不报错不中断流程
+            if estimate_skew_angle is None:
+                return jsonify({'error': '纠偏函数不可用'}), 500
+            ang = float(estimate_skew_angle(bgr))
+            M = cv2.getRotationMatrix2D((bgr.shape[1] / 2.0, bgr.shape[0] / 2.0), -ang, 1.0)
+            rotated_bgr = cv2.warpAffine(bgr, M, (bgr.shape[1], bgr.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+            rotated_rgb = cv2.cvtColor(rotated_bgr, cv2.COLOR_BGR2RGB)
+            rotated_b64 = recognizer.encode_image(rotated_rgb)
+            return jsonify({
+                'success': True,
+                'mode': 'deskew-only',
+                'points': [],
+                'overlay': f'data:image/jpeg;base64,{rotated_b64}',
+                'image': f'data:image/jpeg;base64,{rotated_b64}',
+                'diagnostics': diagnostics if diagnostics else {'reason': 'no suitable quadrilateral found'}
+            })
+    except Exception as e:
+        logger.error(f"透视矫正失败: {str(e)}")
+        return jsonify({'error': f'透视矫正失败: {str(e)}'}), 500
 
 # 旋转图像API
 @app.route('/api/rotate', methods=['POST'])
@@ -980,11 +1193,16 @@ def ocr():
         # 执行OCR
         engine = (data.get('engine') or '').lower()
         variant = (data.get('variant') or '').lower()
+        alternatives = []
         if engine in ('doubao', 'remote'):
             if remote_ocr is None:
                 return jsonify({'error': '远程OCR未配置'}), 400
             # 注意：前端发送的是裁剪后的PNG base64（不含头部），我们直接透传
             text = remote_ocr.ocr(data['image'], crop_area=crop_area)
+        elif engine in ('rapid', 'local2'):
+            rapid = recognizer.ocr_text_rapid(img, crop_area=crop_area)
+            text = rapid.get('text', '')
+            alternatives = rapid.get('alternatives', [])
         else:
             # 统一本地识别：忽略 variant，使用合并后的单一管线，并返回备选
             merged = recognizer.ocr_text_merged(img, crop_area=crop_area)
@@ -1185,3 +1403,5 @@ if __name__ == '__main__':
     
     # 以调试模式启动服务
     app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+
+# 透视矫正代码已上移
